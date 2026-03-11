@@ -3,6 +3,7 @@ from functools import lru_cache
 from investment_bot.core.settings import get_settings
 from investment_bot.market_data.registry import build_default_market_data_registry
 from investment_bot.risk.controller import RiskController
+from investment_bot.services.account_service import AccountService
 from investment_bot.services.alert_service import AlertService
 from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.candle_store import CandleStore
@@ -98,6 +99,11 @@ def get_upbit_client() -> UpbitClient:
 
 
 @lru_cache
+def get_account_service() -> AccountService:
+    return AccountService(upbit_client=get_upbit_client())
+
+
+@lru_cache
 def get_exchange_rules_service() -> ExchangeRulesService:
     return ExchangeRulesService(upbit_client=get_upbit_client())
 
@@ -148,6 +154,7 @@ def get_shadow_service() -> ShadowService:
         semi_live_service=get_semi_live_service(),
         run_history_service=get_run_history_service(),
         upbit_client=get_upbit_client(),
+        account_service=get_account_service(),
     )
 
 
