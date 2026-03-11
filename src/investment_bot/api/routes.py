@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_run_history_service, get_trading_cycle_service
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_run_history_service, get_semi_live_service, get_trading_cycle_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -40,6 +40,13 @@ class ReplayBacktestRequest(BaseModel):
     timeframe: str = "1h"
     window: int = Field(default=5, ge=1, le=500)
     steps: int = Field(default=1, ge=1, le=500)
+
+
+class SemiLiveCycleRequest(BaseModel):
+    strategy_name: str
+    symbol: str
+    timeframe: str = "1h"
+    limit: int = Field(default=5, ge=1, le=500)
 
 
 @router.get("/health")
@@ -232,6 +239,19 @@ def run_replay_backtest(request: ReplayBacktestRequest) -> dict:
         )
         get_run_history_service().record(kind="replay_backtest", payload=result)
         return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/cycle/semi-live")
+def run_semi_live_cycle(request: SemiLiveCycleRequest) -> dict:
+    try:
+        return get_semi_live_service().run_once(
+            strategy_name=request.strategy_name,
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            limit=request.limit,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
