@@ -29,6 +29,8 @@ def get_paper_broker() -> PaperBroker:
     return PaperBroker(
         starting_cash=settings.starting_cash,
         ledger_store=LedgerStore(settings.ledger_path),
+        trading_fee_pct=settings.trading_fee_pct,
+        slippage_pct=settings.slippage_pct,
     )
 
 

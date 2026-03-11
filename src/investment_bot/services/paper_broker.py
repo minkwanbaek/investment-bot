@@ -4,13 +4,21 @@ from investment_bot.services.ledger_store import LedgerStore
 
 
 class PaperBroker:
-    def __init__(self, starting_cash: float = 10_000_000, ledger_store: LedgerStore | None = None):
+    def __init__(
+        self,
+        starting_cash: float = 10_000_000,
+        ledger_store: LedgerStore | None = None,
+        trading_fee_pct: float = 0.05,
+        slippage_pct: float = 0.05,
+    ):
         self.starting_cash = starting_cash
         self.cash_balance = starting_cash
         self.orders: list[PaperOrder] = []
         self.positions: dict[str, dict] = {}
         self.last_prices: dict[str, float] = {}
         self.total_realized_pnl = 0.0
+        self.trading_fee_pct = trading_fee_pct
+        self.slippage_pct = slippage_pct
         self.ledger_store = ledger_store
         self._load_state()
 
@@ -45,7 +53,11 @@ class PaperBroker:
         action = reviewed_signal["action"]
         approved_size = reviewed_signal["size_scale"]
         symbol = reviewed_signal.get("symbol", "BTC/KRW")
-        notional_value = round(approved_size * execution_price, 4)
+        requested_price = execution_price
+        slippage_multiplier = 1 + (self.slippage_pct / 100) if action == "buy" else 1 - (self.slippage_pct / 100)
+        executed_price = round(requested_price * slippage_multiplier, 4)
+        notional_value = round(approved_size * executed_price, 4)
+        fee_paid = round(notional_value * (self.trading_fee_pct / 100), 4)
 
         order = PaperOrder(
             strategy_name=reviewed_signal["strategy_name"],
@@ -54,7 +66,11 @@ class PaperBroker:
             confidence=reviewed_signal["confidence"],
             requested_size=reviewed_signal["confidence"],
             approved_size=approved_size,
-            execution_price=execution_price,
+            requested_price=requested_price,
+            execution_price=executed_price,
+            slippage_pct=self.slippage_pct,
+            fee_pct=self.trading_fee_pct,
+            fee_paid=fee_paid,
             notional_value=notional_value,
             reason=reviewed_signal["reason"],
         )
@@ -67,20 +83,20 @@ class PaperBroker:
         )
 
         if action == "buy":
-            total_cost = (position["quantity"] * position["average_price"]) + notional_value
+            total_cost = (position["quantity"] * position["average_price"]) + notional_value + fee_paid
             new_quantity = position["quantity"] + approved_size
             position["quantity"] = round(new_quantity, 4)
             position["average_price"] = round(total_cost / new_quantity, 4) if new_quantity else 0.0
-            self.cash_balance = round(self.cash_balance - notional_value, 4)
+            self.cash_balance = round(self.cash_balance - notional_value - fee_paid, 4)
         elif action == "sell":
             sell_quantity = min(approved_size, position["quantity"])
-            realized_pnl = (execution_price - position["average_price"]) * sell_quantity
+            realized_pnl = ((executed_price - position["average_price"]) * sell_quantity) - fee_paid
             position["quantity"] = round(position["quantity"] - sell_quantity, 4)
             if position["quantity"] == 0:
                 position["average_price"] = 0.0
             position["realized_pnl"] = round(position["realized_pnl"] + realized_pnl, 4)
             self.total_realized_pnl = round(self.total_realized_pnl + realized_pnl, 4)
-            self.cash_balance = round(self.cash_balance + (sell_quantity * execution_price), 4)
+            self.cash_balance = round(self.cash_balance + (sell_quantity * executed_price) - fee_paid, 4)
 
         self._persist_state()
         return {"status": "recorded", "order": order.model_dump()}

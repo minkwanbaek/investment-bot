@@ -8,7 +8,7 @@ def test_ledger_store_persists_broker_state(tmp_path):
     ledger_path = tmp_path / "paper_ledger.json"
     store = LedgerStore(str(ledger_path))
 
-    broker = PaperBroker(starting_cash=1000, ledger_store=store)
+    broker = PaperBroker(starting_cash=1000, ledger_store=store, trading_fee_pct=0.0, slippage_pct=0.0)
     broker.submit(
         {
             "strategy_name": "trend_following",
@@ -27,7 +27,7 @@ def test_ledger_store_persists_broker_state(tmp_path):
     assert payload["cash_balance"] == 900.0
     assert payload["portfolio"]["total_unrealized_pnl"] == 20.0
 
-    restored = PaperBroker(starting_cash=1000, ledger_store=store)
+    restored = PaperBroker(starting_cash=1000, ledger_store=store, trading_fee_pct=0.0, slippage_pct=0.0)
     snapshot = restored.portfolio_snapshot()
     assert snapshot["cash_balance"] == 900.0
     assert snapshot["positions"]["BTC/KRW"]["market_price"] == 120.0

@@ -26,4 +26,6 @@ def test_services_reflect_config_values():
     broker = get_paper_broker()
     risk_controller = get_risk_controller()
     assert broker.starting_cash == 10_000_000
+    assert broker.trading_fee_pct == 0.05
+    assert broker.slippage_pct == 0.05
     assert risk_controller.max_confidence_position_scale == 0.01

@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     starting_cash: float = 10_000_000
     ledger_path: str = "data/paper_ledger.json"
     candle_store_path: str = "data/candles.json"
+    trading_fee_pct: float = 0.05
+    slippage_pct: float = 0.05
     max_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 3.0
     max_drawdown_pct: float = 10.0
@@ -83,6 +85,8 @@ def get_settings() -> Settings:
         starting_cash=file_config.trading.starting_cash,
         ledger_path=raw_settings.ledger_path,
         candle_store_path=raw_settings.candle_store_path,
+        trading_fee_pct=raw_settings.trading_fee_pct,
+        slippage_pct=raw_settings.slippage_pct,
         max_risk_per_trade_pct=file_config.risk.max_risk_per_trade_pct,
         max_daily_loss_pct=file_config.risk.max_daily_loss_pct,
         max_drawdown_pct=file_config.risk.max_drawdown_pct,

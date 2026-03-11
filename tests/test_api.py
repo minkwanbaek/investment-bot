@@ -84,7 +84,9 @@ def test_dry_run_cycle_records_order_for_buy_signal():
     assert body["signal"]["action"] == "buy"
     assert body["review"]["approved"] is True
     assert body["broker_result"]["status"] == "recorded"
-    assert body["broker_result"]["order"]["execution_price"] == 104
+    assert body["broker_result"]["order"]["requested_price"] == 104
+    assert body["broker_result"]["order"]["execution_price"] > 104
+    assert body["broker_result"]["order"]["fee_pct"] == 0.05
     assert body["portfolio"]["order_count"] == 1
     assert body["portfolio"]["positions"]["BTC/KRW"]["quantity"] > 0
     assert body["portfolio"]["positions"]["BTC/KRW"]["average_price"] == 104
