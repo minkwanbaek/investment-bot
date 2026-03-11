@@ -6,6 +6,7 @@ from investment_bot.risk.controller import RiskController
 from investment_bot.services.alert_service import AlertService
 from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.candle_store import CandleStore
+from investment_bot.services.config_service import ConfigService
 from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.market_data_service import MarketDataService
 from investment_bot.services.metrics_service import MetricsService
@@ -57,6 +58,11 @@ def get_alert_service() -> AlertService:
         unrealized_pnl_threshold=-(settings.starting_cash * (settings.max_daily_loss_pct / 100)),
         drawdown_pct_threshold=settings.max_drawdown_pct,
     )
+
+
+@lru_cache
+def get_config_service() -> ConfigService:
+    return ConfigService(settings=get_settings())
 
 
 @lru_cache

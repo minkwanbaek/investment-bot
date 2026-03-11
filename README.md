@@ -43,6 +43,7 @@ pytest -q
 ## API
 - `GET /health` - service health plus active symbols/base currency
 - `GET /config` - resolved runtime settings
+- `GET /config/validate` - validate resolved runtime settings and report issues/warnings
 - `GET /strategies` - registered and enabled strategies
 - `GET /paper/portfolio` - paper portfolio snapshot plus threshold-based alerts
 - `GET /market-data/adapters` - available market-data adapters

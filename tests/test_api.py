@@ -46,6 +46,14 @@ def test_config_endpoint_returns_loaded_settings():
     assert body["enabled_strategies"] == ["dca", "mean_reversion", "trend_following"]
 
 
+def test_config_validation_endpoint_returns_valid_result():
+    response = client.get("/config/validate")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert body["issues"] == []
+
+
 def test_portfolio_endpoint_returns_empty_snapshot():
     response = client.get("/paper/portfolio")
     assert response.status_code == 200
@@ -167,6 +175,8 @@ def test_replay_backtest_endpoint_runs_multi_step_summary():
     assert len(body["runs"]) == 2
     assert body["runs"][0]["timestamp"] == "5"
     assert body["metrics"]["total_steps"] == 2
+    assert body["metrics"]["equity_curve"][0] == 10000000
+    assert "profit_factor" in body["metrics"]
     assert "return_pct" in body["metrics"]
 
 

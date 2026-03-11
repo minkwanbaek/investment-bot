@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_alert_service, get_backtest_service, get_market_data_service, get_paper_broker, get_trading_cycle_service
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_trading_cycle_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -59,6 +59,11 @@ def health() -> dict:
 def config() -> dict:
     settings = get_settings()
     return settings.model_dump()
+
+
+@router.get("/config/validate")
+def validate_config() -> dict:
+    return get_config_service().validate()
 
 
 @router.get("/strategies")

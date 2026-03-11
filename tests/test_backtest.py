@@ -41,5 +41,7 @@ def test_replay_backtest_runs_multiple_steps_and_returns_summary():
     assert result["runs"][0]["timestamp"] == "5"
     assert result["runs"][1]["timestamp"] == "6"
     assert result["metrics"]["total_steps"] == 2
+    assert result["metrics"]["equity_curve"][0] == 1000
+    assert "win_rate_pct" in result["metrics"]
     assert result["metrics"]["order_count"] >= 1
     assert result["final_portfolio"]["order_count"] >= 1

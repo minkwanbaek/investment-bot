@@ -10,16 +10,31 @@ class MetricsService:
         sell_signals = sum(1 for run in runs if run["signal"]["action"] == "sell")
         hold_signals = sum(1 for run in runs if run["signal"]["action"] == "hold")
 
-        equity_curve = [run["portfolio"]["total_equity"] for run in runs]
+        equity_curve = [starting_cash] + [run["portfolio"]["total_equity"] for run in runs]
         ending_equity = final_portfolio["total_equity"]
         net_pnl = round(ending_equity - starting_cash, 4)
         return_pct = round((net_pnl / starting_cash) * 100, 4) if starting_cash else 0.0
         max_equity = starting_cash
         max_drawdown_pct = 0.0
-        for equity in equity_curve:
+        winning_steps = 0
+        losing_steps = 0
+        gross_profit = 0.0
+        gross_loss = 0.0
+
+        for prev_equity, equity in zip(equity_curve, equity_curve[1:]):
+            pnl_change = round(equity - prev_equity, 4)
+            if pnl_change > 0:
+                winning_steps += 1
+                gross_profit += pnl_change
+            elif pnl_change < 0:
+                losing_steps += 1
+                gross_loss += abs(pnl_change)
             max_equity = max(max_equity, equity)
             drawdown_pct = ((max_equity - equity) / max_equity * 100) if max_equity else 0.0
             max_drawdown_pct = max(max_drawdown_pct, drawdown_pct)
+
+        win_rate_pct = round((winning_steps / total_steps) * 100, 4) if total_steps else 0.0
+        profit_factor = round(gross_profit / gross_loss, 4) if gross_loss else None
 
         return {
             "total_steps": total_steps,
@@ -27,6 +42,13 @@ class MetricsService:
             "buy_signals": buy_signals,
             "sell_signals": sell_signals,
             "hold_signals": hold_signals,
+            "winning_steps": winning_steps,
+            "losing_steps": losing_steps,
+            "win_rate_pct": win_rate_pct,
+            "gross_profit": round(gross_profit, 4),
+            "gross_loss": round(gross_loss, 4),
+            "profit_factor": profit_factor,
+            "equity_curve": equity_curve,
             "ending_equity": ending_equity,
             "net_pnl": net_pnl,
             "return_pct": return_pct,
