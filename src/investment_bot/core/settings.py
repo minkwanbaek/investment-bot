@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     ledger_path: str = "data/paper_ledger.json"
     candle_store_path: str = "data/candles.json"
     run_history_path: str = "data/run_history.json"
+    upbit_access_key: str = Field(default="", validation_alias="UPBIT_ACCESS_KEY")
+    upbit_secret_key: str = Field(default="", validation_alias="UPBIT_SECRET_KEY")
     trading_fee_pct: float = 0.05
     slippage_pct: float = 0.05
     max_risk_per_trade_pct: float = 1.0
@@ -96,6 +98,8 @@ def get_settings() -> Settings:
         ledger_path=raw_settings.ledger_path,
         candle_store_path=raw_settings.candle_store_path,
         run_history_path=raw_settings.run_history_path,
+        upbit_access_key=raw_settings.upbit_access_key,
+        upbit_secret_key=raw_settings.upbit_secret_key,
         trading_fee_pct=raw_settings.trading_fee_pct,
         slippage_pct=raw_settings.slippage_pct,
         max_risk_per_trade_pct=file_config.risk.max_risk_per_trade_pct,

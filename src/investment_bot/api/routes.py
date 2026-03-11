@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_trading_cycle_service
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_trading_cycle_service, get_upbit_client
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -116,6 +116,34 @@ def reset_paper_state() -> dict:
 @router.get("/market-data/adapters")
 def market_data_adapters() -> dict:
     return {"adapters": get_market_data_service().list_adapters()}
+
+
+@router.get("/exchange/upbit/status")
+def upbit_status() -> dict:
+    client = get_upbit_client()
+    return {"exchange": "upbit", "configured": client.configured()}
+
+
+@router.get("/exchange/upbit/markets")
+def upbit_markets() -> dict:
+    try:
+        markets = get_upbit_client().get_markets()
+        payload = {"exchange": "upbit", "count": len(markets), "markets": markets}
+        get_run_history_service().record(kind="upbit_markets", payload=payload)
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/exchange/upbit/balances")
+def upbit_balances() -> dict:
+    try:
+        balances = get_upbit_client().get_balances()
+        payload = {"exchange": "upbit", "count": len(balances), "balances": balances}
+        get_run_history_service().record(kind="upbit_balances", payload={"exchange": "upbit", "count": len(balances)})
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/market-data/live/test")

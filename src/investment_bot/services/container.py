@@ -17,6 +17,7 @@ from investment_bot.services.run_history_store import RunHistoryStore
 from investment_bot.services.scheduler_service import SchedulerService
 from investment_bot.services.semi_live_service import SemiLiveService
 from investment_bot.services.trading_cycle import TradingCycleService
+from investment_bot.services.upbit_client import UpbitClient
 
 
 @lru_cache
@@ -79,6 +80,12 @@ def get_config_service() -> ConfigService:
 def get_run_history_service() -> RunHistoryService:
     settings = get_settings()
     return RunHistoryService(store=RunHistoryStore(settings.run_history_path))
+
+
+@lru_cache
+def get_upbit_client() -> UpbitClient:
+    settings = get_settings()
+    return UpbitClient(access_key=settings.upbit_access_key, secret_key=settings.upbit_secret_key)
 
 
 @lru_cache

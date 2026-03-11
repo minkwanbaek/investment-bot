@@ -54,6 +54,9 @@ pytest -q
 - `GET /runs/summary?limit=...` - operator dashboard summary for recent runs, stop reasons, and latest portfolio snapshot
 - `POST /runs/reset` - clear run history
 - `GET /market-data/adapters` - available market-data adapters (`mock`, `replay`, `live`)
+- `GET /exchange/upbit/status` - verify whether Upbit credentials are configured
+- `GET /exchange/upbit/markets` - fetch Upbit market list (public)
+- `GET /exchange/upbit/balances` - fetch Upbit account balances (private, read-only)
 - `GET /market-data/live/test?symbol=...&timeframe=...&limit=...` - probe live public market data and store a run-history entry
 - `GET /market-data/stored?symbol=...&timeframe=...&limit=...` - read stored candles from the local candle store
 - `GET /market-data/stored/export` - export all stored candle series metadata and payload
