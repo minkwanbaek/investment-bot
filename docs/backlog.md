@@ -21,5 +21,5 @@
 
 ## Later
 - [ ] Multi-exchange portfolio view
-- [ ] Live execution adapter
+- [ ] Live execution adapter (actual order submission behind current guarded preview/submit flow)
 - [ ] ML model research lane

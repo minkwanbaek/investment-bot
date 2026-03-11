@@ -24,6 +24,8 @@
 - operator dashboard
 - exchange account read-only integration
 - paper/live separation hardening
+- shadow mode against real exchange balances
+- guarded live-order preview flow
 
 ## Phase 4 - Selective Expansion
 - multi-asset support

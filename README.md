@@ -3,17 +3,17 @@
 AI-assisted crypto investment bot built iteratively.
 
 ## Current phase
-Phase 0 / Iteration 1:
-- Documentation-first project framing
-- MVP architecture scaffold
-- FastAPI health/config surface
-- Strategy/risk domain skeletons
+Phase 3 / Controlled Operations:
+- Deterministic paper-trading prototype is operational
+- Replay/backtest, semi-live, shadow, and read-only exchange flows are available
+- Live execution remains safety-blocked behind explicit mode + confirmation controls
 
 ## Principles
 - Build small, validate fast
 - Start with paper trading before live execution
 - Prefer deterministic strategy/risk logic over LLM-driven order decisions
 - Optimize for low external API cost
+- Keep live trading disabled by default until read-only, shadow, and rule-validation paths are all verified
 
 ## Run
 ```bash
@@ -39,6 +39,9 @@ pytest -q
 - Environment variables can still override individual settings
 - Paper ledger persistence path defaults to `data/paper_ledger.json` and can be overridden with `INVESTMENT_BOT_LEDGER_PATH`
 - Candle store path defaults to `data/candles.json` and can be overridden with `INVESTMENT_BOT_CANDLE_STORE_PATH`
+- Run history path defaults to `data/run_history.json`
+- Upbit read-only keys are loaded from `.env` via `UPBIT_ACCESS_KEY` / `UPBIT_SECRET_KEY`
+- Live mode controls: `INVESTMENT_BOT_LIVE_MODE` (`paper|shadow|live`), `INVESTMENT_BOT_CONFIRM_LIVE_TRADING` (`true|false`)
 - Execution cost defaults: `INVESTMENT_BOT_TRADING_FEE_PCT=0.05`, `INVESTMENT_BOT_SLIPPAGE_PCT=0.05`
 - Safety limits: `min_order_notional=0` by default, `max_consecutive_buys=3`, `max_symbol_exposure_pct=25` (configurable via `config/app.yml`)
 
@@ -62,6 +65,11 @@ pytest -q
 - `POST /cycle/shadow` - run one shadow-mode cycle using live market data + real account read-only balances, without submitting a live order
 - `POST /exchange/upbit/orders/preview` - preview a live order against Upbit tick/min-notional rules without sending it
 - `POST /exchange/upbit/orders/submit` - currently blocked unless live mode + confirmation are explicitly enabled; returns the next order payload shape for the future live adapter
+
+## Practical status
+- **Working now:** paper trading, replay backtests, semi-live paper cycles, shadow cycles against real Upbit balances, run history, dashboard summary, rule/tick-size inspection, guarded live order previews
+- **Intentionally blocked now:** real live order submission
+- **Next unlock step:** implement the actual Upbit order adapter behind the existing guarded submit flow
 - `GET /market-data/live/test?symbol=...&timeframe=...&limit=...` - probe live public market data and store a run-history entry
 - `GET /market-data/stored?symbol=...&timeframe=...&limit=...` - read stored candles from the local candle store
 - `GET /market-data/stored/export` - export all stored candle series metadata and payload
