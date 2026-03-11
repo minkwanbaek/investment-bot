@@ -87,6 +87,7 @@ def test_dry_run_cycle_records_order_for_buy_signal():
     body = response.json()
     assert body["signal"]["action"] == "buy"
     assert body["review"]["approved"] is True
+    assert body["review"]["target_notional"] > 0
     assert body["broker_result"]["status"] == "recorded"
     assert body["broker_result"]["order"]["requested_price"] == 104
     assert body["broker_result"]["order"]["execution_price"] > 104

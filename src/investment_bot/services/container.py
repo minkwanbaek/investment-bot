@@ -38,6 +38,7 @@ def get_paper_broker() -> PaperBroker:
         slippage_pct=settings.slippage_pct,
         min_order_notional=settings.min_order_notional,
         max_consecutive_buys=settings.max_consecutive_buys,
+        max_symbol_exposure_pct=settings.max_symbol_exposure_pct,
     )
 
 

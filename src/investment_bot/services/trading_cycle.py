@@ -22,8 +22,12 @@ class TradingCycleService:
 
         strategy = strategy_cls()
         signal: TradeSignal = strategy.generate_signal(candles)
-        review = self.risk_controller.review(signal)
         latest_price = candles[-1].close
+        review = self.risk_controller.review(
+            signal,
+            cash_balance=self.paper_broker.cash_balance,
+            latest_price=latest_price,
+        )
         self.paper_broker.mark_price(signal.symbol, latest_price)
         broker_result = self.paper_broker.submit(review, execution_price=latest_price) if review["approved"] else None
 

@@ -19,6 +19,7 @@ class TradingConfig(BaseModel):
     starting_cash: float = 10_000_000
     min_order_notional: float = 0.0
     max_consecutive_buys: int = 3
+    max_symbol_exposure_pct: float = 25.0
 
 
 class RiskConfig(BaseModel):
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
     starting_cash: float = 10_000_000
     min_order_notional: float = 0.0
     max_consecutive_buys: int = 3
+    max_symbol_exposure_pct: float = 25.0
     ledger_path: str = "data/paper_ledger.json"
     candle_store_path: str = "data/candles.json"
     run_history_path: str = "data/run_history.json"
@@ -90,6 +92,7 @@ def get_settings() -> Settings:
         starting_cash=file_config.trading.starting_cash,
         min_order_notional=file_config.trading.min_order_notional,
         max_consecutive_buys=file_config.trading.max_consecutive_buys,
+        max_symbol_exposure_pct=file_config.trading.max_symbol_exposure_pct,
         ledger_path=raw_settings.ledger_path,
         candle_store_path=raw_settings.candle_store_path,
         run_history_path=raw_settings.run_history_path,

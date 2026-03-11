@@ -12,6 +12,7 @@ class PaperBroker:
         slippage_pct: float = 0.05,
         min_order_notional: float = 5_000,
         max_consecutive_buys: int = 3,
+        max_symbol_exposure_pct: float = 25.0,
     ):
         self.starting_cash = starting_cash
         self.cash_balance = starting_cash
@@ -23,6 +24,7 @@ class PaperBroker:
         self.slippage_pct = slippage_pct
         self.min_order_notional = min_order_notional
         self.max_consecutive_buys = max_consecutive_buys
+        self.max_symbol_exposure_pct = max_symbol_exposure_pct
         self.consecutive_buys = 0
         self.ledger_store = ledger_store
         self._load_state()
@@ -73,6 +75,15 @@ class PaperBroker:
             return {"status": "rejected", "reason": "max_consecutive_buys_reached", "max_consecutive_buys": self.max_consecutive_buys}
         if action == "buy" and total_buy_cost > self.cash_balance:
             return {"status": "rejected", "reason": "insufficient_cash", "cash_balance": self.cash_balance}
+        if action == "buy":
+            current_position_value = self.positions.get(symbol, {}).get("quantity", 0.0) * requested_price
+            max_symbol_exposure_value = self.starting_cash * (self.max_symbol_exposure_pct / 100)
+            if current_position_value + notional_value > max_symbol_exposure_value:
+                return {
+                    "status": "rejected",
+                    "reason": "max_symbol_exposure_reached",
+                    "max_symbol_exposure_pct": self.max_symbol_exposure_pct,
+                }
 
         order = PaperOrder(
             strategy_name=reviewed_signal["strategy_name"],
