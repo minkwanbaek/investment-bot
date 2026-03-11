@@ -10,6 +10,7 @@ from investment_bot.services.config_service import ConfigService
 from investment_bot.services.exchange_rules_service import ExchangeRulesService
 from investment_bot.services.fail_safe_service import FailSafeService
 from investment_bot.services.ledger_store import LedgerStore
+from investment_bot.services.live_execution_service import LiveExecutionService
 from investment_bot.services.market_data_service import MarketDataService
 from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
@@ -93,6 +94,18 @@ def get_upbit_client() -> UpbitClient:
 @lru_cache
 def get_exchange_rules_service() -> ExchangeRulesService:
     return ExchangeRulesService(upbit_client=get_upbit_client())
+
+
+@lru_cache
+def get_live_execution_service() -> LiveExecutionService:
+    settings = get_settings()
+    return LiveExecutionService(
+        upbit_client=get_upbit_client(),
+        exchange_rules_service=get_exchange_rules_service(),
+        run_history_service=get_run_history_service(),
+        live_mode=settings.live_mode,
+        confirm_live_trading=settings.confirm_live_trading,
+    )
 
 
 @lru_cache

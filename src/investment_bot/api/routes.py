@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -63,6 +63,13 @@ class ShadowCycleRequest(BaseModel):
     symbol: str
     timeframe: str = "1h"
     limit: int = Field(default=5, ge=1, le=500)
+
+
+class LiveOrderPreviewRequest(BaseModel):
+    symbol: str
+    side: str
+    price: float = Field(gt=0)
+    volume: float = Field(gt=0)
 
 
 @router.get("/health")
@@ -341,6 +348,32 @@ def run_shadow_cycle(request: ShadowCycleRequest) -> dict:
             symbol=request.symbol,
             timeframe=request.timeframe,
             limit=request.limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/exchange/upbit/orders/preview")
+def preview_upbit_order(request: LiveOrderPreviewRequest) -> dict:
+    try:
+        return get_live_execution_service().preview_order(
+            symbol=request.symbol,
+            side=request.side,
+            price=request.price,
+            volume=request.volume,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/exchange/upbit/orders/submit")
+def submit_upbit_order(request: LiveOrderPreviewRequest) -> dict:
+    try:
+        return get_live_execution_service().submit_order(
+            symbol=request.symbol,
+            side=request.side,
+            price=request.price,
+            volume=request.volume,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
