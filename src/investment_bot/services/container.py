@@ -3,16 +3,23 @@ from functools import lru_cache
 from investment_bot.core.settings import get_settings
 from investment_bot.market_data.registry import build_default_market_data_registry
 from investment_bot.risk.controller import RiskController
+from investment_bot.services.alert_service import AlertService
 from investment_bot.services.backtest_service import BacktestService
+from investment_bot.services.candle_store import CandleStore
 from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.market_data_service import MarketDataService
+from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.services.trading_cycle import TradingCycleService
 
 
 @lru_cache
 def get_market_data_service() -> MarketDataService:
-    return MarketDataService(registry=build_default_market_data_registry())
+    settings = get_settings()
+    return MarketDataService(
+        registry=build_default_market_data_registry(),
+        candle_store=CandleStore(settings.candle_store_path),
+    )
 
 
 @lru_cache
@@ -39,9 +46,24 @@ def get_trading_cycle_service() -> TradingCycleService:
 
 
 @lru_cache
+def get_metrics_service() -> MetricsService:
+    return MetricsService()
+
+
+@lru_cache
+def get_alert_service() -> AlertService:
+    settings = get_settings()
+    return AlertService(
+        unrealized_pnl_threshold=-(settings.starting_cash * (settings.max_daily_loss_pct / 100)),
+        drawdown_pct_threshold=settings.max_drawdown_pct,
+    )
+
+
+@lru_cache
 def get_backtest_service() -> BacktestService:
     return BacktestService(
         market_data_service=get_market_data_service(),
         paper_broker=get_paper_broker(),
         trading_cycle_service=get_trading_cycle_service(),
+        metrics_service=get_metrics_service(),
     )

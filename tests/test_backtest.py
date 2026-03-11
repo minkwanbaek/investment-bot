@@ -3,6 +3,7 @@ from investment_bot.models.market import Candle
 from investment_bot.risk.controller import RiskController
 from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.market_data_service import MarketDataService
+from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.services.trading_cycle import TradingCycleService
 
@@ -18,6 +19,7 @@ def test_replay_backtest_runs_multiple_steps_and_returns_summary():
         market_data_service=market_data_service,
         paper_broker=paper_broker,
         trading_cycle_service=trading_cycle_service,
+        metrics_service=MetricsService(),
     )
 
     candles = [
@@ -38,4 +40,6 @@ def test_replay_backtest_runs_multiple_steps_and_returns_summary():
     assert len(result["runs"]) == 2
     assert result["runs"][0]["timestamp"] == "5"
     assert result["runs"][1]["timestamp"] == "6"
+    assert result["metrics"]["total_steps"] == 2
+    assert result["metrics"]["order_count"] >= 1
     assert result["final_portfolio"]["order_count"] >= 1

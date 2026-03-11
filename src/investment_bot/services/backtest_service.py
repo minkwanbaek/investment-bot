@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from investment_bot.services.market_data_service import MarketDataService
+from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.services.trading_cycle import TradingCycleService
 
@@ -10,6 +11,7 @@ class BacktestService:
     market_data_service: MarketDataService
     paper_broker: PaperBroker
     trading_cycle_service: TradingCycleService
+    metrics_service: MetricsService
 
     def run_replay(self, strategy_name: str, symbol: str, timeframe: str, window: int, steps: int) -> dict:
         if window < 1:
@@ -43,6 +45,11 @@ class BacktestService:
             self.market_data_service.advance_replay(symbol=symbol, timeframe=timeframe, steps=1)
 
         final_portfolio = self.paper_broker.portfolio_snapshot()
+        metrics = self.metrics_service.summarize_backtest(
+            starting_cash=self.paper_broker.starting_cash,
+            runs=runs,
+            final_portfolio=final_portfolio,
+        )
         return {
             "strategy": strategy_name,
             "symbol": symbol,
@@ -50,5 +57,6 @@ class BacktestService:
             "window": window,
             "steps": steps,
             "runs": runs,
+            "metrics": metrics,
             "final_portfolio": final_portfolio,
         }

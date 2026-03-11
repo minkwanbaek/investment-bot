@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_backtest_service, get_market_data_service, get_paper_broker, get_trading_cycle_service
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_market_data_service, get_paper_broker, get_trading_cycle_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -71,7 +71,11 @@ def strategies() -> dict:
 
 @router.get("/paper/portfolio")
 def paper_portfolio() -> dict:
-    return get_paper_broker().portfolio_snapshot()
+    portfolio = get_paper_broker().portfolio_snapshot()
+    return {
+        "portfolio": portfolio,
+        "alerts": get_alert_service().evaluate_portfolio(portfolio),
+    }
 
 
 @router.get("/market-data/adapters")
@@ -111,6 +115,15 @@ def advance_replay_market_data(request: ReplayAdvanceRequest) -> dict:
             timeframe=request.timeframe,
             steps=request.steps,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market-data/stored")
+def stored_market_data(symbol: str, timeframe: str, limit: int = 100) -> dict:
+    try:
+        candles = get_market_data_service().get_stored_candles(symbol=symbol, timeframe=timeframe, limit=limit)
+        return {"symbol": symbol, "timeframe": timeframe, "count": len(candles), "candles": [c.model_dump() for c in candles]}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     symbols: list[str] = Field(default_factory=lambda: ["BTC/KRW"])
     starting_cash: float = 10_000_000
     ledger_path: str = "data/paper_ledger.json"
+    candle_store_path: str = "data/candles.json"
     max_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 3.0
     max_drawdown_pct: float = 10.0
@@ -81,6 +82,7 @@ def get_settings() -> Settings:
         symbols=file_config.trading.symbols,
         starting_cash=file_config.trading.starting_cash,
         ledger_path=raw_settings.ledger_path,
+        candle_store_path=raw_settings.candle_store_path,
         max_risk_per_trade_pct=file_config.risk.max_risk_per_trade_pct,
         max_daily_loss_pct=file_config.risk.max_daily_loss_pct,
         max_drawdown_pct=file_config.risk.max_drawdown_pct,

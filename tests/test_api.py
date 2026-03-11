@@ -21,6 +21,8 @@ def setup_function():
         broker._persist_state()
 
     market_data_service = get_market_data_service()
+    if market_data_service.candle_store:
+        market_data_service.candle_store.store.path.unlink(missing_ok=True)
     mock_adapter = market_data_service.registry.get("mock")
     replay_adapter = market_data_service.registry.get("replay")
     mock_adapter._series.clear()
@@ -48,10 +50,11 @@ def test_portfolio_endpoint_returns_empty_snapshot():
     response = client.get("/paper/portfolio")
     assert response.status_code == 200
     body = response.json()
-    assert body["order_count"] == 0
-    assert body["positions"] == {}
-    assert body["total_realized_pnl"] == 0
-    assert body["total_unrealized_pnl"] == 0
+    assert body["portfolio"]["order_count"] == 0
+    assert body["portfolio"]["positions"] == {}
+    assert body["portfolio"]["total_realized_pnl"] == 0
+    assert body["portfolio"]["total_unrealized_pnl"] == 0
+    assert body["alerts"] == []
 
 
 def test_dry_run_cycle_records_order_for_buy_signal():
@@ -163,3 +166,23 @@ def test_replay_backtest_endpoint_runs_multi_step_summary():
     assert body["steps"] == 2
     assert len(body["runs"]) == 2
     assert body["runs"][0]["timestamp"] == "5"
+    assert body["metrics"]["total_steps"] == 2
+    assert "return_pct" in body["metrics"]
+
+
+def test_stored_market_data_endpoint_returns_persisted_candles():
+    candles = [
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 100, "volume": 1, "timestamp": "1"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 101, "volume": 1, "timestamp": "2"},
+    ]
+    seed_response = client.post(
+        "/market-data/mock/seed",
+        json={"symbol": "BTC/KRW", "timeframe": "1h", "candles": candles},
+    )
+    assert seed_response.status_code == 200
+
+    stored_response = client.get("/market-data/stored?symbol=BTC/KRW&timeframe=1h&limit=10")
+    assert stored_response.status_code == 200
+    body = stored_response.json()
+    assert body["count"] >= 2
+    assert body["candles"][-1]["close"] == 101

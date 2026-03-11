@@ -11,10 +11,10 @@
 - [x] Add dry-run cycle endpoint
 
 ## Next
-- [ ] Candle storage
+- [x] Candle storage
 - [x] Backtest harness
-- [ ] Metrics service
-- [ ] Alert service
+- [x] Metrics service
+- [x] Alert service
 - [ ] Config validation UI/API
 - [x] Position average price / realized PnL / unrealized PnL in paper broker
 - [x] Market data adapter interface for live and replay inputs
