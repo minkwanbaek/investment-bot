@@ -1,0 +1,19 @@
+app:
+  name: investment-bot
+  environment: local
+trading:
+  mode: paper
+  base_currency: KRW
+  symbols:
+    - BTC/KRW
+risk:
+  max_risk_per_trade_pct: 1.0
+  max_daily_loss_pct: 3.0
+  max_drawdown_pct: 10.0
+strategies:
+  trend_following:
+    enabled: true
+  mean_reversion:
+    enabled: true
+  dca:
+    enabled: true
