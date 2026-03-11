@@ -57,6 +57,8 @@ pytest -q
 - `GET /exchange/upbit/status` - verify whether Upbit credentials are configured
 - `GET /exchange/upbit/markets` - fetch Upbit market list (public)
 - `GET /exchange/upbit/balances` - fetch Upbit account balances (private, read-only)
+- `GET /exchange/upbit/rules?symbol=...` - inspect Upbit market rules and minimum notional assumptions for a symbol
+- `GET /exchange/upbit/normalize-price?symbol=...&price=...` - normalize a requested price to the current Upbit tick-size ladder
 - `POST /cycle/shadow` - run one shadow-mode cycle using live market data + real account read-only balances, without submitting a live order
 - `GET /market-data/live/test?symbol=...&timeframe=...&limit=...` - probe live public market data and store a run-history entry
 - `GET /market-data/stored?symbol=...&timeframe=...&limit=...` - read stored candles from the local candle store

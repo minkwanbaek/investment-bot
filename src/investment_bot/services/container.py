@@ -7,6 +7,7 @@ from investment_bot.services.alert_service import AlertService
 from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.candle_store import CandleStore
 from investment_bot.services.config_service import ConfigService
+from investment_bot.services.exchange_rules_service import ExchangeRulesService
 from investment_bot.services.fail_safe_service import FailSafeService
 from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.market_data_service import MarketDataService
@@ -87,6 +88,11 @@ def get_run_history_service() -> RunHistoryService:
 def get_upbit_client() -> UpbitClient:
     settings = get_settings()
     return UpbitClient(access_key=settings.upbit_access_key, secret_key=settings.upbit_secret_key)
+
+
+@lru_cache
+def get_exchange_rules_service() -> ExchangeRulesService:
+    return ExchangeRulesService(upbit_client=get_upbit_client())
 
 
 @lru_cache

@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -149,6 +149,24 @@ def upbit_balances() -> dict:
         payload = {"exchange": "upbit", "count": len(balances), "balances": balances}
         get_run_history_service().record(kind="upbit_balances", payload={"exchange": "upbit", "count": len(balances)})
         return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/exchange/upbit/rules")
+def upbit_rules(symbol: str = "BTC/KRW") -> dict:
+    try:
+        payload = get_exchange_rules_service().get_upbit_market_rules(symbol=symbol)
+        get_run_history_service().record(kind="upbit_rules", payload={"exchange": "upbit", "symbol": symbol})
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/exchange/upbit/normalize-price")
+def upbit_normalize_price(symbol: str = "BTC/KRW", price: float = 0.0) -> dict:
+    try:
+        return get_exchange_rules_service().normalize_upbit_price(symbol=symbol, price=price)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
