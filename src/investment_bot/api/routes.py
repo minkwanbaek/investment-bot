@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client, get_visualization_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -387,6 +387,11 @@ def list_recent_runs(limit: int = 20) -> dict:
 @router.get("/runs/summary")
 def summarize_recent_runs(limit: int = 20) -> dict:
     return get_run_history_service().summarize_recent(limit=limit)
+
+
+@router.get("/visualizations/profit-structure")
+def profit_structure_visualization(limit: int = 50) -> dict:
+    return get_visualization_service().summarize_profit_structure(limit=limit)
 
 
 @router.post("/runs/reset")

@@ -55,6 +55,7 @@ pytest -q
 - `POST /paper/reset` - reset paper broker state to clean starting cash
 - `GET /runs?limit=...` - list recent live tests / dry runs / backtests
 - `GET /runs/summary?limit=...` - operator dashboard summary for recent runs, stop reasons, and latest portfolio snapshot
+- `GET /visualizations/profit-structure?limit=...` - chart-ready equity curve / PnL waterfall / stop-reason aggregates for dashboarding
 - `POST /runs/reset` - clear run history
 - `GET /market-data/adapters` - available market-data adapters (`mock`, `replay`, `live`)
 - `GET /exchange/upbit/status` - verify whether Upbit credentials are configured

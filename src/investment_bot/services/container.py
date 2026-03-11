@@ -21,6 +21,7 @@ from investment_bot.services.semi_live_service import SemiLiveService
 from investment_bot.services.shadow_service import ShadowService
 from investment_bot.services.trading_cycle import TradingCycleService
 from investment_bot.services.upbit_client import UpbitClient
+from investment_bot.services.visualization_service import VisualizationService
 
 
 @lru_cache
@@ -83,6 +84,11 @@ def get_config_service() -> ConfigService:
 def get_run_history_service() -> RunHistoryService:
     settings = get_settings()
     return RunHistoryService(store=RunHistoryStore(settings.run_history_path))
+
+
+@lru_cache
+def get_visualization_service() -> VisualizationService:
+    return VisualizationService(run_history_service=get_run_history_service())
 
 
 @lru_cache
