@@ -43,4 +43,9 @@ pytest -q
 - `GET /config` - resolved runtime settings
 - `GET /strategies` - registered and enabled strategies
 - `GET /paper/portfolio` - in-memory paper portfolio snapshot with cash, positions, and PnL
+- `GET /market-data/adapters` - available market-data adapters
+- `POST /market-data/mock/seed` - seed mock candles for a symbol/timeframe
+- `POST /market-data/replay/load` - load replay candles for a symbol/timeframe
+- `POST /market-data/replay/advance` - advance replay cursor
 - `POST /cycle/dry-run` - run one strategy cycle against submitted candles and record approved paper order at the latest candle price
+- `POST /cycle/from-adapter` - run one strategy cycle from a configured market-data adapter

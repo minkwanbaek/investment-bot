@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_paper_broker, get_trading_cycle_service
+from investment_bot.services.container import get_market_data_service, get_paper_broker, get_trading_cycle_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -12,6 +12,26 @@ router = APIRouter()
 class DryRunCycleRequest(BaseModel):
     strategy_name: str
     candles: list[Candle] = Field(min_length=1)
+
+
+class SeedMarketDataRequest(BaseModel):
+    symbol: str
+    timeframe: str = "1h"
+    candles: list[Candle] = Field(min_length=1)
+
+
+class AdapterCycleRequest(BaseModel):
+    strategy_name: str
+    adapter_name: str
+    symbol: str
+    timeframe: str = "1h"
+    limit: int = Field(default=5, ge=1, le=500)
+
+
+class ReplayAdvanceRequest(BaseModel):
+    symbol: str
+    timeframe: str = "1h"
+    steps: int = Field(default=1, ge=1, le=500)
 
 
 @router.get("/health")
@@ -46,10 +66,74 @@ def paper_portfolio() -> dict:
     return get_paper_broker().portfolio_snapshot()
 
 
+@router.get("/market-data/adapters")
+def market_data_adapters() -> dict:
+    return {"adapters": get_market_data_service().list_adapters()}
+
+
+@router.post("/market-data/mock/seed")
+def seed_mock_market_data(request: SeedMarketDataRequest) -> dict:
+    try:
+        return get_market_data_service().seed_mock(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            candles=request.candles,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/market-data/replay/load")
+def load_replay_market_data(request: SeedMarketDataRequest) -> dict:
+    try:
+        return get_market_data_service().load_replay(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            candles=request.candles,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/market-data/replay/advance")
+def advance_replay_market_data(request: ReplayAdvanceRequest) -> dict:
+    try:
+        return get_market_data_service().advance_replay(
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            steps=request.steps,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/cycle/dry-run")
 def dry_run_cycle(request: DryRunCycleRequest) -> dict:
     service = get_trading_cycle_service()
     try:
         return service.run(strategy_name=request.strategy_name, candles=request.candles)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/cycle/from-adapter")
+def run_cycle_from_adapter(request: AdapterCycleRequest) -> dict:
+    service = get_trading_cycle_service()
+    market_data_service = get_market_data_service()
+    try:
+        candles = market_data_service.get_recent_candles(
+            adapter_name=request.adapter_name,
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            limit=request.limit,
+        )
+        result = service.run(strategy_name=request.strategy_name, candles=candles)
+        return {
+            "adapter": request.adapter_name,
+            "symbol": request.symbol,
+            "timeframe": request.timeframe,
+            "limit": request.limit,
+            **result,
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

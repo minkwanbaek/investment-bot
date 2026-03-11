@@ -17,7 +17,7 @@
 - [ ] Alert service
 - [ ] Config validation UI/API
 - [x] Position average price / realized PnL / unrealized PnL in paper broker
-- [ ] Market data adapter interface for live and replay inputs
+- [x] Market data adapter interface for live and replay inputs
 
 ## Later
 - [ ] Multi-exchange portfolio view

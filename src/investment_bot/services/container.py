@@ -1,9 +1,16 @@
 from functools import lru_cache
 
 from investment_bot.core.settings import get_settings
+from investment_bot.market_data.registry import build_default_market_data_registry
 from investment_bot.risk.controller import RiskController
+from investment_bot.services.market_data_service import MarketDataService
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.services.trading_cycle import TradingCycleService
+
+
+@lru_cache
+def get_market_data_service() -> MarketDataService:
+    return MarketDataService(registry=build_default_market_data_registry())
 
 
 @lru_cache
