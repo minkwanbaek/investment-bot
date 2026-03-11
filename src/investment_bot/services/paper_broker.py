@@ -1,15 +1,45 @@
 from investment_bot.models.order import PaperOrder
 from investment_bot.models.portfolio import PortfolioSnapshot, PositionSnapshot
+from investment_bot.services.ledger_store import LedgerStore
 
 
 class PaperBroker:
-    def __init__(self, starting_cash: float = 10_000_000):
+    def __init__(self, starting_cash: float = 10_000_000, ledger_store: LedgerStore | None = None):
         self.starting_cash = starting_cash
         self.cash_balance = starting_cash
         self.orders: list[PaperOrder] = []
         self.positions: dict[str, dict] = {}
         self.last_prices: dict[str, float] = {}
         self.total_realized_pnl = 0.0
+        self.ledger_store = ledger_store
+        self._load_state()
+
+    def _load_state(self) -> None:
+        if not self.ledger_store:
+            return
+        payload = self.ledger_store.load()
+        if not payload:
+            return
+        self.cash_balance = payload.get("cash_balance", self.starting_cash)
+        self.positions = payload.get("positions", {})
+        self.last_prices = payload.get("last_prices", {})
+        self.total_realized_pnl = payload.get("total_realized_pnl", 0.0)
+        self.orders = [PaperOrder.model_validate(order) for order in payload.get("orders", [])]
+
+    def _persist_state(self) -> None:
+        if not self.ledger_store:
+            return
+        self.ledger_store.save(
+            {
+                "starting_cash": self.starting_cash,
+                "cash_balance": self.cash_balance,
+                "positions": self.positions,
+                "last_prices": self.last_prices,
+                "total_realized_pnl": self.total_realized_pnl,
+                "orders": [order.model_dump() for order in self.orders],
+                "portfolio": self.portfolio_snapshot(),
+            }
+        )
 
     def submit(self, reviewed_signal: dict, execution_price: float) -> dict:
         action = reviewed_signal["action"]
@@ -52,10 +82,12 @@ class PaperBroker:
             self.total_realized_pnl = round(self.total_realized_pnl + realized_pnl, 4)
             self.cash_balance = round(self.cash_balance + (sell_quantity * execution_price), 4)
 
+        self._persist_state()
         return {"status": "recorded", "order": order.model_dump()}
 
     def mark_price(self, symbol: str, market_price: float) -> None:
         self.last_prices[symbol] = market_price
+        self._persist_state()
 
     def portfolio_snapshot(self) -> dict:
         snapshots: dict[str, PositionSnapshot] = {}

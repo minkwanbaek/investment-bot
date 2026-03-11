@@ -37,6 +37,7 @@ pytest -q
 - Default runtime config lives in `config/app.yml`
 - Override config file path with `INVESTMENT_BOT_CONFIG_PATH`
 - Environment variables can still override individual settings
+- Paper ledger persistence path defaults to `data/paper_ledger.json` and can be overridden with `INVESTMENT_BOT_LEDGER_PATH`
 
 ## API
 - `GET /health` - service health plus active symbols/base currency

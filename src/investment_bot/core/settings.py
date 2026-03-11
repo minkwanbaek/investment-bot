@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     base_currency: str = "KRW"
     symbols: list[str] = Field(default_factory=lambda: ["BTC/KRW"])
     starting_cash: float = 10_000_000
+    ledger_path: str = "data/paper_ledger.json"
     max_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 3.0
     max_drawdown_pct: float = 10.0
@@ -79,6 +80,7 @@ def get_settings() -> Settings:
         base_currency=file_config.trading.base_currency,
         symbols=file_config.trading.symbols,
         starting_cash=file_config.trading.starting_cash,
+        ledger_path=raw_settings.ledger_path,
         max_risk_per_trade_pct=file_config.risk.max_risk_per_trade_pct,
         max_daily_loss_pct=file_config.risk.max_daily_loss_pct,
         max_drawdown_pct=file_config.risk.max_drawdown_pct,
