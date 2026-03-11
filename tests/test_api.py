@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from investment_bot.main import app
-from investment_bot.services.container import get_market_data_service, get_paper_broker
+from investment_bot.services.container import get_market_data_service, get_paper_broker, get_run_history_service
 
 
 client = TestClient(app)
@@ -28,6 +28,9 @@ def setup_function():
     mock_adapter._series.clear()
     replay_adapter._series.clear()
     replay_adapter._cursor.clear()
+
+    run_history_service = get_run_history_service()
+    run_history_service.reset()
 
 
 def test_health_endpoint_exposes_runtime_config():
@@ -233,6 +236,10 @@ def test_export_and_reset_endpoints_manage_operator_state():
     assert stored_export.status_code == 200
     assert stored_export.json()["total_series"] >= 1
 
+    runs_response = client.get("/runs?limit=10")
+    assert runs_response.status_code == 200
+    assert len(runs_response.json()["runs"]) >= 1
+
     paper_reset = client.post("/paper/reset")
     assert paper_reset.status_code == 200
     assert paper_reset.json()["portfolio"]["order_count"] == 0
@@ -240,3 +247,7 @@ def test_export_and_reset_endpoints_manage_operator_state():
     stored_reset = client.post("/market-data/stored/reset")
     assert stored_reset.status_code == 200
     assert stored_reset.json()["status"] == "cleared"
+
+    runs_reset = client.post("/runs/reset")
+    assert runs_reset.status_code == 200
+    assert runs_reset.json()["status"] == "cleared"

@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_trading_cycle_service
+from investment_bot.services.container import get_alert_service, get_backtest_service, get_config_service, get_market_data_service, get_paper_broker, get_run_history_service, get_trading_cycle_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -102,6 +102,28 @@ def market_data_adapters() -> dict:
     return {"adapters": get_market_data_service().list_adapters()}
 
 
+@router.get("/market-data/live/test")
+def test_live_market_data(symbol: str = "BTC/KRW", timeframe: str = "1h", limit: int = 3) -> dict:
+    try:
+        candles = get_market_data_service().get_recent_candles(
+            adapter_name="live",
+            symbol=symbol,
+            timeframe=timeframe,
+            limit=limit,
+        )
+        payload = {
+            "adapter": "live",
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "count": len(candles),
+            "candles": [c.model_dump() for c in candles],
+        }
+        get_run_history_service().record(kind="live_market_test", payload=payload)
+        return payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/market-data/mock/seed")
 def seed_mock_market_data(request: SeedMarketDataRequest) -> dict:
     try:
@@ -167,7 +189,9 @@ def reset_stored_market_data() -> dict:
 def dry_run_cycle(request: DryRunCycleRequest) -> dict:
     service = get_trading_cycle_service()
     try:
-        return service.run(strategy_name=request.strategy_name, candles=request.candles)
+        result = service.run(strategy_name=request.strategy_name, candles=request.candles)
+        get_run_history_service().record(kind="dry_run_cycle", payload=result)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -183,14 +207,15 @@ def run_cycle_from_adapter(request: AdapterCycleRequest) -> dict:
             timeframe=request.timeframe,
             limit=request.limit,
         )
-        result = service.run(strategy_name=request.strategy_name, candles=candles)
-        return {
+        result = {
             "adapter": request.adapter_name,
             "symbol": request.symbol,
             "timeframe": request.timeframe,
             "limit": request.limit,
-            **result,
+            **service.run(strategy_name=request.strategy_name, candles=candles),
         }
+        get_run_history_service().record(kind="adapter_cycle", payload=result)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -198,12 +223,24 @@ def run_cycle_from_adapter(request: AdapterCycleRequest) -> dict:
 @router.post("/backtest/replay")
 def run_replay_backtest(request: ReplayBacktestRequest) -> dict:
     try:
-        return get_backtest_service().run_replay(
+        result = get_backtest_service().run_replay(
             strategy_name=request.strategy_name,
             symbol=request.symbol,
             timeframe=request.timeframe,
             window=request.window,
             steps=request.steps,
         )
+        get_run_history_service().record(kind="replay_backtest", payload=result)
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/runs")
+def list_recent_runs(limit: int = 20) -> dict:
+    return {"runs": get_run_history_service().list_recent(limit=limit)}
+
+
+@router.post("/runs/reset")
+def reset_runs() -> dict:
+    return get_run_history_service().reset()

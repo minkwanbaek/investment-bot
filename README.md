@@ -49,7 +49,10 @@ pytest -q
 - `GET /paper/portfolio` - paper portfolio snapshot plus threshold-based alerts
 - `GET /paper/export` - export current paper broker state
 - `POST /paper/reset` - reset paper broker state to clean starting cash
+- `GET /runs?limit=...` - list recent live tests / dry runs / backtests
+- `POST /runs/reset` - clear run history
 - `GET /market-data/adapters` - available market-data adapters (`mock`, `replay`, `live`)
+- `GET /market-data/live/test?symbol=...&timeframe=...&limit=...` - probe live public market data and store a run-history entry
 - `GET /market-data/stored?symbol=...&timeframe=...&limit=...` - read stored candles from the local candle store
 - `GET /market-data/stored/export` - export all stored candle series metadata and payload
 - `POST /market-data/stored/reset` - clear stored candle series

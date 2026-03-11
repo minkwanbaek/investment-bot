@@ -11,6 +11,8 @@ from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.market_data_service import MarketDataService
 from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
+from investment_bot.services.run_history_service import RunHistoryService
+from investment_bot.services.run_history_store import RunHistoryStore
 from investment_bot.services.trading_cycle import TradingCycleService
 
 
@@ -65,6 +67,12 @@ def get_alert_service() -> AlertService:
 @lru_cache
 def get_config_service() -> ConfigService:
     return ConfigService(settings=get_settings())
+
+
+@lru_cache
+def get_run_history_service() -> RunHistoryService:
+    settings = get_settings()
+    return RunHistoryService(store=RunHistoryStore(settings.run_history_path))
 
 
 @lru_cache
