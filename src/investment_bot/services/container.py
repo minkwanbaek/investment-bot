@@ -13,6 +13,7 @@ from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.run_history_store import RunHistoryStore
+from investment_bot.services.scheduler_service import SchedulerService
 from investment_bot.services.semi_live_service import SemiLiveService
 from investment_bot.services.trading_cycle import TradingCycleService
 
@@ -93,5 +94,13 @@ def get_semi_live_service() -> SemiLiveService:
     return SemiLiveService(
         market_data_service=get_market_data_service(),
         trading_cycle_service=get_trading_cycle_service(),
+        run_history_service=get_run_history_service(),
+    )
+
+
+@lru_cache
+def get_scheduler_service() -> SchedulerService:
+    return SchedulerService(
+        semi_live_service=get_semi_live_service(),
         run_history_service=get_run_history_service(),
     )
