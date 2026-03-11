@@ -29,6 +29,10 @@ class ConfigService:
             issues.append(f"unknown enabled strategies: {', '.join(sorted(unknown_enabled))}")
         if not self.settings.enabled_strategies:
             warnings.append("no strategies are enabled")
+        if self.settings.live_mode not in {"paper", "shadow", "live"}:
+            issues.append("live_mode must be one of: paper, shadow, live")
+        if self.settings.live_mode == "live" and not self.settings.confirm_live_trading:
+            warnings.append("live mode selected but confirm_live_trading is false")
 
         return {
             "valid": len(issues) == 0,
@@ -43,5 +47,7 @@ class ConfigService:
                     "max_daily_loss_pct": self.settings.max_daily_loss_pct,
                     "max_drawdown_pct": self.settings.max_drawdown_pct,
                 },
+                "live_mode": self.settings.live_mode,
+                "confirm_live_trading": self.settings.confirm_live_trading,
             },
         }
