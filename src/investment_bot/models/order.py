@@ -9,5 +9,7 @@ class PaperOrder(BaseModel):
     confidence: float = Field(ge=0, le=1)
     requested_size: float = Field(ge=0)
     approved_size: float = Field(ge=0)
+    execution_price: float = Field(gt=0)
+    notional_value: float = Field(ge=0)
     reason: str
     status: Literal["recorded"] = "recorded"

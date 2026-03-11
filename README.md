@@ -42,5 +42,5 @@ pytest -q
 - `GET /health` - service health plus active symbols/base currency
 - `GET /config` - resolved runtime settings
 - `GET /strategies` - registered and enabled strategies
-- `GET /paper/portfolio` - in-memory paper portfolio snapshot
-- `POST /cycle/dry-run` - run one strategy cycle against submitted candles and record approved paper order
+- `GET /paper/portfolio` - in-memory paper portfolio snapshot with cash, positions, and PnL
+- `POST /cycle/dry-run` - run one strategy cycle against submitted candles and record approved paper order at the latest candle price

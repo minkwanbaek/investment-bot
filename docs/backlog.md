@@ -16,7 +16,7 @@
 - [ ] Metrics service
 - [ ] Alert service
 - [ ] Config validation UI/API
-- [ ] Position average price / realized PnL / unrealized PnL in paper broker
+- [x] Position average price / realized PnL / unrealized PnL in paper broker
 - [ ] Market data adapter interface for live and replay inputs
 
 ## Later

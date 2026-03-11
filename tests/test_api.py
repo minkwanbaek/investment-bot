@@ -11,7 +11,9 @@ def setup_function():
     broker = get_paper_broker()
     broker.orders.clear()
     broker.positions.clear()
+    broker.last_prices.clear()
     broker.cash_balance = broker.starting_cash
+    broker.total_realized_pnl = 0.0
 
 
 def test_health_endpoint_exposes_runtime_config():
@@ -36,6 +38,8 @@ def test_portfolio_endpoint_returns_empty_snapshot():
     body = response.json()
     assert body["order_count"] == 0
     assert body["positions"] == {}
+    assert body["total_realized_pnl"] == 0
+    assert body["total_unrealized_pnl"] == 0
 
 
 def test_dry_run_cycle_records_order_for_buy_signal():
@@ -57,8 +61,10 @@ def test_dry_run_cycle_records_order_for_buy_signal():
     assert body["signal"]["action"] == "buy"
     assert body["review"]["approved"] is True
     assert body["broker_result"]["status"] == "recorded"
+    assert body["broker_result"]["order"]["execution_price"] == 104
     assert body["portfolio"]["order_count"] == 1
-    assert body["portfolio"]["positions"]["BTC/KRW"] > 0
+    assert body["portfolio"]["positions"]["BTC/KRW"]["quantity"] > 0
+    assert body["portfolio"]["positions"]["BTC/KRW"]["average_price"] == 104
 
 
 def test_dry_run_cycle_rejects_unknown_strategy():
