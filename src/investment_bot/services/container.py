@@ -7,6 +7,7 @@ from investment_bot.services.alert_service import AlertService
 from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.candle_store import CandleStore
 from investment_bot.services.config_service import ConfigService
+from investment_bot.services.fail_safe_service import FailSafeService
 from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.market_data_service import MarketDataService
 from investment_bot.services.metrics_service import MetricsService
@@ -99,8 +100,18 @@ def get_semi_live_service() -> SemiLiveService:
 
 
 @lru_cache
+def get_fail_safe_service() -> FailSafeService:
+    return FailSafeService(
+        alert_service=get_alert_service(),
+        max_alerts_per_batch=1,
+        max_loss_steps=2,
+    )
+
+
+@lru_cache
 def get_scheduler_service() -> SchedulerService:
     return SchedulerService(
         semi_live_service=get_semi_live_service(),
         run_history_service=get_run_history_service(),
+        fail_safe_service=get_fail_safe_service(),
     )

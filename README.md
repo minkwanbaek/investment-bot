@@ -64,4 +64,4 @@ pytest -q
 - `POST /cycle/from-adapter` - run one strategy cycle from a configured market-data adapter
 - `POST /backtest/replay` - run a replay-based multi-step backtest and return step-by-step results plus summary metrics
 - `POST /cycle/semi-live` - fetch live public candles once and execute one semi-live paper cycle
-- `POST /cycle/semi-live/batch` - run a small semi-live batch loop for a requested number of iterations
+- `POST /cycle/semi-live/batch` - run a small semi-live batch loop for a requested number of iterations with fail-safe stopping
