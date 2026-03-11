@@ -51,6 +51,7 @@ pytest -q
 - `GET /paper/export` - export current paper broker state
 - `POST /paper/reset` - reset paper broker state to clean starting cash
 - `GET /runs?limit=...` - list recent live tests / dry runs / backtests
+- `GET /runs/summary?limit=...` - operator dashboard summary for recent runs, stop reasons, and latest portfolio snapshot
 - `POST /runs/reset` - clear run history
 - `GET /market-data/adapters` - available market-data adapters (`mock`, `replay`, `live`)
 - `GET /market-data/live/test?symbol=...&timeframe=...&limit=...` - probe live public market data and store a run-history entry

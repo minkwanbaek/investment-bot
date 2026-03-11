@@ -285,6 +285,11 @@ def list_recent_runs(limit: int = 20) -> dict:
     return {"runs": get_run_history_service().list_recent(limit=limit)}
 
 
+@router.get("/runs/summary")
+def summarize_recent_runs(limit: int = 20) -> dict:
+    return get_run_history_service().summarize_recent(limit=limit)
+
+
 @router.post("/runs/reset")
 def reset_runs() -> dict:
     return get_run_history_service().reset()
