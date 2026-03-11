@@ -3,9 +3,9 @@ from investment_bot.models.market import Candle
 from investment_bot.services.market_data_service import MarketDataService
 
 
-def test_market_data_registry_exposes_mock_and_replay():
+def test_market_data_registry_exposes_default_adapters():
     service = MarketDataService(registry=build_default_market_data_registry())
-    assert service.list_adapters() == ["mock", "replay"]
+    assert service.list_adapters() == ["live", "mock", "replay"]
 
 
 def test_mock_market_data_returns_seeded_recent_candles():

@@ -46,8 +46,12 @@ pytest -q
 - `GET /config/validate` - validate resolved runtime settings and report issues/warnings
 - `GET /strategies` - registered and enabled strategies
 - `GET /paper/portfolio` - paper portfolio snapshot plus threshold-based alerts
-- `GET /market-data/adapters` - available market-data adapters
+- `GET /paper/export` - export current paper broker state
+- `POST /paper/reset` - reset paper broker state to clean starting cash
+- `GET /market-data/adapters` - available market-data adapters (`mock`, `replay`, `live`)
 - `GET /market-data/stored?symbol=...&timeframe=...&limit=...` - read stored candles from the local candle store
+- `GET /market-data/stored/export` - export all stored candle series metadata and payload
+- `POST /market-data/stored/reset` - clear stored candle series
 - `POST /market-data/mock/seed` - seed mock candles for a symbol/timeframe
 - `POST /market-data/replay/load` - load replay candles for a symbol/timeframe
 - `POST /market-data/replay/advance` - advance replay cursor

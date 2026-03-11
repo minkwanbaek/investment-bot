@@ -196,3 +196,45 @@ def test_stored_market_data_endpoint_returns_persisted_candles():
     body = stored_response.json()
     assert body["count"] >= 2
     assert body["candles"][-1]["close"] == 101
+
+
+def test_export_and_reset_endpoints_manage_operator_state():
+    client.post(
+        "/market-data/mock/seed",
+        json={
+            "symbol": "BTC/KRW",
+            "timeframe": "1h",
+            "candles": [
+                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 100, "volume": 1, "timestamp": "1"},
+            ],
+        },
+    )
+    client.post(
+        "/cycle/dry-run",
+        json={
+            "strategy_name": "trend_following",
+            "candles": [
+                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 100, "volume": 1, "timestamp": "1"},
+                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 101, "volume": 1, "timestamp": "2"},
+                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 102, "volume": 1, "timestamp": "3"},
+                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 103, "volume": 1, "timestamp": "4"},
+                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 104, "volume": 1, "timestamp": "5"},
+            ],
+        },
+    )
+
+    paper_export = client.get("/paper/export")
+    assert paper_export.status_code == 200
+    assert paper_export.json()["portfolio"]["order_count"] >= 1
+
+    stored_export = client.get("/market-data/stored/export")
+    assert stored_export.status_code == 200
+    assert stored_export.json()["total_series"] >= 1
+
+    paper_reset = client.post("/paper/reset")
+    assert paper_reset.status_code == 200
+    assert paper_reset.json()["portfolio"]["order_count"] == 0
+
+    stored_reset = client.post("/market-data/stored/reset")
+    assert stored_reset.status_code == 200
+    assert stored_reset.json()["status"] == "cleared"

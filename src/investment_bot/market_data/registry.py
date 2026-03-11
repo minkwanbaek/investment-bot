@@ -1,4 +1,5 @@
 from investment_bot.market_data.base import MarketDataAdapter
+from investment_bot.market_data.live import LiveMarketDataAdapter
 from investment_bot.market_data.mock import MockMarketDataAdapter
 from investment_bot.market_data.replay import ReplayMarketDataAdapter
 
@@ -24,4 +25,5 @@ def build_default_market_data_registry() -> MarketDataRegistry:
     registry = MarketDataRegistry()
     registry.register(MockMarketDataAdapter())
     registry.register(ReplayMarketDataAdapter())
+    registry.register(LiveMarketDataAdapter())
     return registry

@@ -46,6 +46,16 @@ class MarketDataService:
     def get_recent_candles(self, adapter_name: str, symbol: str, timeframe: str, limit: int) -> list[Candle]:
         return list(self.registry.get(adapter_name).get_recent_candles(symbol=symbol, timeframe=timeframe, limit=limit))
 
+    def reset_candle_store(self) -> dict:
+        if not self.candle_store:
+            raise ValueError("candle store unavailable")
+        return self.candle_store.reset()
+
+    def export_candle_store(self) -> dict:
+        if not self.candle_store:
+            raise ValueError("candle store unavailable")
+        return self.candle_store.export_state()
+
     def get_stored_candles(self, symbol: str, timeframe: str, limit: int) -> list[Candle]:
         if not self.candle_store:
             raise ValueError("candle store unavailable")

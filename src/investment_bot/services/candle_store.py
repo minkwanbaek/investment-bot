@@ -24,6 +24,18 @@ class CandleStore:
         self.store.save(payload)
         return {"key": key, "count": len(ordered)}
 
+    def reset(self) -> dict:
+        self.store.save({})
+        return {"status": "cleared"}
+
+    def export_state(self) -> dict:
+        payload = self.load()
+        return {
+            "keys": sorted(payload.keys()),
+            "total_series": len(payload),
+            "payload": payload,
+        }
+
     def list_recent(self, symbol: str, timeframe: str, limit: int) -> list[Candle]:
         payload = self.load()
         key = f"{symbol}|{timeframe}"

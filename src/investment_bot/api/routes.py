@@ -83,6 +83,20 @@ def paper_portfolio() -> dict:
     }
 
 
+@router.get("/paper/export")
+def export_paper_state() -> dict:
+    return get_paper_broker().export_state()
+
+
+@router.post("/paper/reset")
+def reset_paper_state() -> dict:
+    portfolio = get_paper_broker().reset()
+    return {
+        "status": "reset",
+        "portfolio": portfolio,
+    }
+
+
 @router.get("/market-data/adapters")
 def market_data_adapters() -> dict:
     return {"adapters": get_market_data_service().list_adapters()}
@@ -129,6 +143,22 @@ def stored_market_data(symbol: str, timeframe: str, limit: int = 100) -> dict:
     try:
         candles = get_market_data_service().get_stored_candles(symbol=symbol, timeframe=timeframe, limit=limit)
         return {"symbol": symbol, "timeframe": timeframe, "count": len(candles), "candles": [c.model_dump() for c in candles]}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market-data/stored/export")
+def export_stored_market_data() -> dict:
+    try:
+        return get_market_data_service().export_candle_store()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/market-data/stored/reset")
+def reset_stored_market_data() -> dict:
+    try:
+        return get_market_data_service().reset_candle_store()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

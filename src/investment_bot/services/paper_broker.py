@@ -89,6 +89,26 @@ class PaperBroker:
         self.last_prices[symbol] = market_price
         self._persist_state()
 
+    def reset(self) -> dict:
+        self.cash_balance = self.starting_cash
+        self.orders = []
+        self.positions = {}
+        self.last_prices = {}
+        self.total_realized_pnl = 0.0
+        self._persist_state()
+        return self.portfolio_snapshot()
+
+    def export_state(self) -> dict:
+        return {
+            "starting_cash": self.starting_cash,
+            "cash_balance": self.cash_balance,
+            "positions": self.positions,
+            "last_prices": self.last_prices,
+            "total_realized_pnl": self.total_realized_pnl,
+            "orders": [order.model_dump() for order in self.orders],
+            "portfolio": self.portfolio_snapshot(),
+        }
+
     def portfolio_snapshot(self) -> dict:
         snapshots: dict[str, PositionSnapshot] = {}
         total_unrealized_pnl = 0.0
