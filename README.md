@@ -57,6 +57,7 @@ pytest -q
 - `GET /exchange/upbit/status` - verify whether Upbit credentials are configured
 - `GET /exchange/upbit/markets` - fetch Upbit market list (public)
 - `GET /exchange/upbit/balances` - fetch Upbit account balances (private, read-only)
+- `POST /cycle/shadow` - run one shadow-mode cycle using live market data + real account read-only balances, without submitting a live order
 - `GET /market-data/live/test?symbol=...&timeframe=...&limit=...` - probe live public market data and store a run-history entry
 - `GET /market-data/stored?symbol=...&timeframe=...&limit=...` - read stored candles from the local candle store
 - `GET /market-data/stored/export` - export all stored candle series metadata and payload

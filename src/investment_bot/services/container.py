@@ -16,6 +16,7 @@ from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.run_history_store import RunHistoryStore
 from investment_bot.services.scheduler_service import SchedulerService
 from investment_bot.services.semi_live_service import SemiLiveService
+from investment_bot.services.shadow_service import ShadowService
 from investment_bot.services.trading_cycle import TradingCycleService
 from investment_bot.services.upbit_client import UpbitClient
 
@@ -113,6 +114,15 @@ def get_fail_safe_service() -> FailSafeService:
         alert_service=get_alert_service(),
         max_alerts_per_batch=1,
         max_loss_steps=2,
+    )
+
+
+@lru_cache
+def get_shadow_service() -> ShadowService:
+    return ShadowService(
+        semi_live_service=get_semi_live_service(),
+        run_history_service=get_run_history_service(),
+        upbit_client=get_upbit_client(),
     )
 
 
