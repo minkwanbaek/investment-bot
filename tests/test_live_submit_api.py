@@ -19,4 +19,4 @@ def test_submit_endpoint_stays_blocked_in_shadow_mode():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "blocked"
-    assert body["reason"] in {"live_mode_disabled", "live_trading_not_confirmed", "order_below_exchange_rules"}
+    assert body["reason"] in {"live_mode_disabled", "live_trading_not_confirmed", "order_below_exchange_rules_or_balance"}

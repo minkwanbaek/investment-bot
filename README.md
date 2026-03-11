@@ -66,12 +66,12 @@ pytest -q
 - `GET /exchange/upbit/normalize-price?symbol=...&price=...` - normalize a requested price to the current Upbit tick-size ladder
 - `POST /cycle/shadow` - run one shadow-mode cycle using live market data + real account read-only balances, without submitting a live order
 - `POST /exchange/upbit/orders/preview` - preview a live order against Upbit tick/min-notional rules without sending it
-- `POST /exchange/upbit/orders/submit` - currently blocked unless live mode + confirmation are explicitly enabled; returns the next order payload shape for the future live adapter
+- `POST /exchange/upbit/orders/submit` - blocked unless live mode + confirmation are explicitly enabled; when fully enabled it now submits a guarded limit order through the Upbit adapter
 
 ## Practical status
 - **Working now:** paper trading, replay backtests, semi-live paper cycles, shadow cycles against real Upbit balances, run history, dashboard summary, rule/tick-size inspection, guarded live order previews
-- **Intentionally blocked now:** real live order submission
-- **Next unlock step:** implement the actual Upbit order adapter behind the existing guarded submit flow
+- **Intentionally blocked now unless explicitly armed:** real live order submission
+- **Current unlock mechanism:** `INVESTMENT_BOT_LIVE_MODE=live` plus `INVESTMENT_BOT_CONFIRM_LIVE_TRADING=true`
 - `GET /market-data/live/test?symbol=...&timeframe=...&limit=...` - probe live public market data and store a run-history entry
 - `GET /market-data/stored?symbol=...&timeframe=...&limit=...` - read stored candles from the local candle store
 - `GET /market-data/stored/export` - export all stored candle series metadata and payload

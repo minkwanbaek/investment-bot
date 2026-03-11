@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from investment_bot.services.account_service import AccountService
 from investment_bot.services.exchange_rules_service import ExchangeRulesService
 from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.upbit_client import UpbitClient
@@ -10,6 +11,7 @@ class LiveExecutionService:
     upbit_client: UpbitClient
     exchange_rules_service: ExchangeRulesService
     run_history_service: RunHistoryService
+    account_service: AccountService | None = None
     live_mode: str = "shadow"
     confirm_live_trading: bool = False
 
@@ -19,6 +21,10 @@ class LiveExecutionService:
         market = rules["market"]
         notional = round(normalized["normalized_price"] * volume, 8)
         allowed = notional >= rules["min_order_notional"]
+        account_summary = self.account_service.summarize_upbit_balances() if self.account_service else None
+        krw_cash = account_summary["krw_cash"] if account_summary else None
+        if side == "buy" and krw_cash is not None and notional > krw_cash:
+            allowed = False
         payload = {
             "exchange": "upbit",
             "mode": self.live_mode,
@@ -32,6 +38,7 @@ class LiveExecutionService:
             "volume": volume,
             "notional": notional,
             "min_order_notional": rules["min_order_notional"],
+            "account_summary": account_summary,
             "would_submit_live": self.live_mode == "live" and self.confirm_live_trading and allowed,
             "allowed": allowed,
             "dry_run_only": self.live_mode != "live" or not self.confirm_live_trading,
@@ -46,16 +53,28 @@ class LiveExecutionService:
         if not self.confirm_live_trading:
             return {**preview, "status": "blocked", "reason": "live_trading_not_confirmed"}
         if not preview["allowed"]:
-            return {**preview, "status": "blocked", "reason": "order_below_exchange_rules"}
-        return {
-            **preview,
-            "status": "not_implemented",
-            "reason": "live_order_adapter_not_implemented_yet",
-            "next_payload": {
-                "market": preview["market"],
-                "side": side,
-                "volume": str(volume),
-                "price": str(preview["normalized_price"]),
-                "ord_type": "limit",
-            },
+            return {**preview, "status": "blocked", "reason": "order_below_exchange_rules_or_balance"}
+
+        order_payload = {
+            "market": preview["market"],
+            "side": side,
+            "volume": str(volume),
+            "price": str(preview["normalized_price"]),
+            "ord_type": "limit",
         }
+        response = self.upbit_client.create_limit_order(**order_payload)
+        result = {
+            **preview,
+            "status": "submitted",
+            "order": response,
+            "submitted_payload": order_payload,
+        }
+        self.run_history_service.record(kind="live_order_submit", payload={
+            "symbol": symbol,
+            "market": preview["market"],
+            "side": side,
+            "price": preview["normalized_price"],
+            "volume": volume,
+            "status": "submitted",
+        })
+        return result

@@ -115,6 +115,7 @@ def get_live_execution_service() -> LiveExecutionService:
         upbit_client=get_upbit_client(),
         exchange_rules_service=get_exchange_rules_service(),
         run_history_service=get_run_history_service(),
+        account_service=get_account_service(),
         live_mode=settings.live_mode,
         confirm_live_trading=settings.confirm_live_trading,
     )
