@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_market_data_service, get_paper_broker, get_trading_cycle_service
+from investment_bot.services.container import get_backtest_service, get_market_data_service, get_paper_broker, get_trading_cycle_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -31,6 +31,14 @@ class AdapterCycleRequest(BaseModel):
 class ReplayAdvanceRequest(BaseModel):
     symbol: str
     timeframe: str = "1h"
+    steps: int = Field(default=1, ge=1, le=500)
+
+
+class ReplayBacktestRequest(BaseModel):
+    strategy_name: str
+    symbol: str
+    timeframe: str = "1h"
+    window: int = Field(default=5, ge=1, le=500)
     steps: int = Field(default=1, ge=1, le=500)
 
 
@@ -135,5 +143,19 @@ def run_cycle_from_adapter(request: AdapterCycleRequest) -> dict:
             "limit": request.limit,
             **result,
         }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/backtest/replay")
+def run_replay_backtest(request: ReplayBacktestRequest) -> dict:
+    try:
+        return get_backtest_service().run_replay(
+            strategy_name=request.strategy_name,
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            window=request.window,
+            steps=request.steps,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

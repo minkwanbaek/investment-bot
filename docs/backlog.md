@@ -12,7 +12,7 @@
 
 ## Next
 - [ ] Candle storage
-- [ ] Backtest harness
+- [x] Backtest harness
 - [ ] Metrics service
 - [ ] Alert service
 - [ ] Config validation UI/API

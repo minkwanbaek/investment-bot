@@ -3,6 +3,7 @@ from functools import lru_cache
 from investment_bot.core.settings import get_settings
 from investment_bot.market_data.registry import build_default_market_data_registry
 from investment_bot.risk.controller import RiskController
+from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.market_data_service import MarketDataService
 from investment_bot.services.paper_broker import PaperBroker
@@ -34,4 +35,13 @@ def get_trading_cycle_service() -> TradingCycleService:
     return TradingCycleService(
         risk_controller=get_risk_controller(),
         paper_broker=get_paper_broker(),
+    )
+
+
+@lru_cache
+def get_backtest_service() -> BacktestService:
+    return BacktestService(
+        market_data_service=get_market_data_service(),
+        paper_broker=get_paper_broker(),
+        trading_cycle_service=get_trading_cycle_service(),
     )

@@ -50,3 +50,4 @@ pytest -q
 - `POST /market-data/replay/advance` - advance replay cursor
 - `POST /cycle/dry-run` - run one strategy cycle against submitted candles and record approved paper order at the latest candle price
 - `POST /cycle/from-adapter` - run one strategy cycle from a configured market-data adapter
+- `POST /backtest/replay` - run a replay-based multi-step backtest and return a step-by-step summary

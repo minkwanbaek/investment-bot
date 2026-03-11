@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from investment_bot.main import app
@@ -14,6 +16,9 @@ def setup_function():
     broker.last_prices.clear()
     broker.cash_balance = broker.starting_cash
     broker.total_realized_pnl = 0.0
+    if broker.ledger_store:
+        broker.ledger_store.path.unlink(missing_ok=True)
+        broker._persist_state()
 
     market_data_service = get_market_data_service()
     mock_adapter = market_data_service.registry.get("mock")
@@ -89,18 +94,19 @@ def test_dry_run_cycle_rejects_unknown_strategy():
 
 
 def test_market_data_adapter_flow_runs_cycle_from_seeded_mock_data():
+    candles = [
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 100, "volume": 1, "timestamp": "1"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 101, "volume": 1, "timestamp": "2"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 102, "volume": 1, "timestamp": "3"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 103, "volume": 1, "timestamp": "4"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 104, "volume": 1, "timestamp": "5"},
+    ]
     seed_response = client.post(
         "/market-data/mock/seed",
         json={
             "symbol": "BTC/KRW",
             "timeframe": "1h",
-            "candles": [
-                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 100, "volume": 1, "timestamp": "1"},
-                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 101, "volume": 1, "timestamp": "2"},
-                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 102, "volume": 1, "timestamp": "3"},
-                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 103, "volume": 1, "timestamp": "4"},
-                {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 104, "volume": 1, "timestamp": "5"},
-            ],
+            "candles": candles,
         },
     )
     assert seed_response.status_code == 200
@@ -120,3 +126,40 @@ def test_market_data_adapter_flow_runs_cycle_from_seeded_mock_data():
     assert body["adapter"] == "mock"
     assert body["signal"]["action"] == "buy"
     assert body["portfolio"]["order_count"] == 1
+
+
+def test_replay_backtest_endpoint_runs_multi_step_summary():
+    candles = [
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 100, "volume": 1, "timestamp": "1"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 101, "volume": 1, "timestamp": "2"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 102, "volume": 1, "timestamp": "3"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 103, "volume": 1, "timestamp": "4"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 104, "volume": 1, "timestamp": "5"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 105, "volume": 1, "timestamp": "6"},
+        {"symbol": "BTC/KRW", "timeframe": "1h", "open": 1, "high": 1, "low": 1, "close": 106, "volume": 1, "timestamp": "7"},
+    ]
+    load_response = client.post(
+        "/market-data/replay/load",
+        json={
+            "symbol": "BTC/KRW",
+            "timeframe": "1h",
+            "candles": candles,
+        },
+    )
+    assert load_response.status_code == 200
+
+    run_response = client.post(
+        "/backtest/replay",
+        json={
+            "strategy_name": "trend_following",
+            "symbol": "BTC/KRW",
+            "timeframe": "1h",
+            "window": 5,
+            "steps": 2,
+        },
+    )
+    assert run_response.status_code == 200
+    body = run_response.json()
+    assert body["steps"] == 2
+    assert len(body["runs"]) == 2
+    assert body["runs"][0]["timestamp"] == "5"
