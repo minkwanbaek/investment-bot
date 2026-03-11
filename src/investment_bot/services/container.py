@@ -34,6 +34,8 @@ def get_paper_broker() -> PaperBroker:
         ledger_store=LedgerStore(settings.ledger_path),
         trading_fee_pct=settings.trading_fee_pct,
         slippage_pct=settings.slippage_pct,
+        min_order_notional=settings.min_order_notional,
+        max_consecutive_buys=settings.max_consecutive_buys,
     )
 
 

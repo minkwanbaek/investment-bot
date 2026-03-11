@@ -2,7 +2,7 @@ from investment_bot.services.paper_broker import PaperBroker
 
 
 def test_paper_broker_tracks_average_price_and_unrealized_pnl():
-    broker = PaperBroker(starting_cash=1000)
+    broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.0, slippage_pct=0.0, min_order_notional=0.0)
 
     broker.submit(
         {
@@ -38,7 +38,7 @@ def test_paper_broker_tracks_average_price_and_unrealized_pnl():
 
 
 def test_paper_broker_tracks_realized_pnl_on_sell():
-    broker = PaperBroker(starting_cash=1000)
+    broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.0, slippage_pct=0.0, min_order_notional=0.0)
 
     broker.submit(
         {

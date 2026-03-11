@@ -40,6 +40,7 @@ pytest -q
 - Paper ledger persistence path defaults to `data/paper_ledger.json` and can be overridden with `INVESTMENT_BOT_LEDGER_PATH`
 - Candle store path defaults to `data/candles.json` and can be overridden with `INVESTMENT_BOT_CANDLE_STORE_PATH`
 - Execution cost defaults: `INVESTMENT_BOT_TRADING_FEE_PCT=0.05`, `INVESTMENT_BOT_SLIPPAGE_PCT=0.05`
+- Safety limits: `min_order_notional=0` by default, `max_consecutive_buys=3` (both configurable via `config/app.yml`)
 
 ## API
 - `GET /health` - service health plus active symbols/base currency

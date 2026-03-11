@@ -10,6 +10,8 @@ class PaperBroker:
         ledger_store: LedgerStore | None = None,
         trading_fee_pct: float = 0.05,
         slippage_pct: float = 0.05,
+        min_order_notional: float = 5_000,
+        max_consecutive_buys: int = 3,
     ):
         self.starting_cash = starting_cash
         self.cash_balance = starting_cash
@@ -19,6 +21,9 @@ class PaperBroker:
         self.total_realized_pnl = 0.0
         self.trading_fee_pct = trading_fee_pct
         self.slippage_pct = slippage_pct
+        self.min_order_notional = min_order_notional
+        self.max_consecutive_buys = max_consecutive_buys
+        self.consecutive_buys = 0
         self.ledger_store = ledger_store
         self._load_state()
 
@@ -32,6 +37,7 @@ class PaperBroker:
         self.positions = payload.get("positions", {})
         self.last_prices = payload.get("last_prices", {})
         self.total_realized_pnl = payload.get("total_realized_pnl", 0.0)
+        self.consecutive_buys = payload.get("consecutive_buys", 0)
         self.orders = [PaperOrder.model_validate(order) for order in payload.get("orders", [])]
 
     def _persist_state(self) -> None:
@@ -44,6 +50,7 @@ class PaperBroker:
                 "positions": self.positions,
                 "last_prices": self.last_prices,
                 "total_realized_pnl": self.total_realized_pnl,
+                "consecutive_buys": self.consecutive_buys,
                 "orders": [order.model_dump() for order in self.orders],
                 "portfolio": self.portfolio_snapshot(),
             }
@@ -58,6 +65,14 @@ class PaperBroker:
         executed_price = round(requested_price * slippage_multiplier, 4)
         notional_value = round(approved_size * executed_price, 4)
         fee_paid = round(notional_value * (self.trading_fee_pct / 100), 4)
+        total_buy_cost = round(notional_value + fee_paid, 4)
+
+        if action == "buy" and notional_value < self.min_order_notional:
+            return {"status": "rejected", "reason": "below_min_order_notional", "min_order_notional": self.min_order_notional}
+        if action == "buy" and self.consecutive_buys >= self.max_consecutive_buys:
+            return {"status": "rejected", "reason": "max_consecutive_buys_reached", "max_consecutive_buys": self.max_consecutive_buys}
+        if action == "buy" and total_buy_cost > self.cash_balance:
+            return {"status": "rejected", "reason": "insufficient_cash", "cash_balance": self.cash_balance}
 
         order = PaperOrder(
             strategy_name=reviewed_signal["strategy_name"],
@@ -87,9 +102,12 @@ class PaperBroker:
             new_quantity = position["quantity"] + approved_size
             position["quantity"] = round(new_quantity, 4)
             position["average_price"] = round(total_cost / new_quantity, 4) if new_quantity else 0.0
-            self.cash_balance = round(self.cash_balance - notional_value - fee_paid, 4)
+            self.cash_balance = round(self.cash_balance - total_buy_cost, 4)
+            self.consecutive_buys += 1
         elif action == "sell":
             sell_quantity = min(approved_size, position["quantity"])
+            if sell_quantity <= 0:
+                return {"status": "rejected", "reason": "no_position_to_sell", "symbol": symbol}
             realized_pnl = ((executed_price - position["average_price"]) * sell_quantity) - fee_paid
             position["quantity"] = round(position["quantity"] - sell_quantity, 4)
             if position["quantity"] == 0:
@@ -97,6 +115,7 @@ class PaperBroker:
             position["realized_pnl"] = round(position["realized_pnl"] + realized_pnl, 4)
             self.total_realized_pnl = round(self.total_realized_pnl + realized_pnl, 4)
             self.cash_balance = round(self.cash_balance + (sell_quantity * executed_price) - fee_paid, 4)
+            self.consecutive_buys = 0
 
         self._persist_state()
         return {"status": "recorded", "order": order.model_dump()}
@@ -111,6 +130,7 @@ class PaperBroker:
         self.positions = {}
         self.last_prices = {}
         self.total_realized_pnl = 0.0
+        self.consecutive_buys = 0
         self._persist_state()
         return self.portfolio_snapshot()
 
@@ -121,6 +141,7 @@ class PaperBroker:
             "positions": self.positions,
             "last_prices": self.last_prices,
             "total_realized_pnl": self.total_realized_pnl,
+            "consecutive_buys": self.consecutive_buys,
             "orders": [order.model_dump() for order in self.orders],
             "portfolio": self.portfolio_snapshot(),
         }

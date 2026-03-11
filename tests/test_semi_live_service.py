@@ -19,7 +19,7 @@ class FakeLiveMarketDataService(MarketDataService):
 
 def test_semi_live_service_runs_once_and_records_history(tmp_path):
     market_data_service = FakeLiveMarketDataService(registry=build_default_market_data_registry())
-    paper_broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.0, slippage_pct=0.0)
+    paper_broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.0, slippage_pct=0.0, min_order_notional=0.0)
     trading_cycle_service = TradingCycleService(
         risk_controller=RiskController(max_confidence_position_scale=0.01),
         paper_broker=paper_broker,

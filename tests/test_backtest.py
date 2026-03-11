@@ -10,7 +10,7 @@ from investment_bot.services.trading_cycle import TradingCycleService
 
 def test_replay_backtest_runs_multiple_steps_and_returns_summary():
     market_data_service = MarketDataService(registry=build_default_market_data_registry())
-    paper_broker = PaperBroker(starting_cash=1000)
+    paper_broker = PaperBroker(starting_cash=1000, min_order_notional=0.0)
     trading_cycle_service = TradingCycleService(
         risk_controller=RiskController(max_confidence_position_scale=0.01),
         paper_broker=paper_broker,

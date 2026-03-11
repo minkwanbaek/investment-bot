@@ -17,6 +17,8 @@ class TradingConfig(BaseModel):
     base_currency: str = "KRW"
     symbols: list[str] = Field(default_factory=lambda: ["BTC/KRW"])
     starting_cash: float = 10_000_000
+    min_order_notional: float = 0.0
+    max_consecutive_buys: int = 3
 
 
 class RiskConfig(BaseModel):
@@ -44,6 +46,8 @@ class Settings(BaseSettings):
     base_currency: str = "KRW"
     symbols: list[str] = Field(default_factory=lambda: ["BTC/KRW"])
     starting_cash: float = 10_000_000
+    min_order_notional: float = 0.0
+    max_consecutive_buys: int = 3
     ledger_path: str = "data/paper_ledger.json"
     candle_store_path: str = "data/candles.json"
     run_history_path: str = "data/run_history.json"
@@ -84,6 +88,8 @@ def get_settings() -> Settings:
         base_currency=file_config.trading.base_currency,
         symbols=file_config.trading.symbols,
         starting_cash=file_config.trading.starting_cash,
+        min_order_notional=file_config.trading.min_order_notional,
+        max_consecutive_buys=file_config.trading.max_consecutive_buys,
         ledger_path=raw_settings.ledger_path,
         candle_store_path=raw_settings.candle_store_path,
         run_history_path=raw_settings.run_history_path,

@@ -2,7 +2,7 @@ from investment_bot.services.paper_broker import PaperBroker
 
 
 def test_paper_broker_applies_fee_and_slippage_to_buy_orders():
-    broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.1, slippage_pct=0.1)
+    broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.1, slippage_pct=0.1, min_order_notional=1)
 
     result = broker.submit(
         {
@@ -24,7 +24,7 @@ def test_paper_broker_applies_fee_and_slippage_to_buy_orders():
 
 
 def test_paper_broker_applies_fee_and_slippage_to_sell_orders():
-    broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.1, slippage_pct=0.1)
+    broker = PaperBroker(starting_cash=1000, trading_fee_pct=0.1, slippage_pct=0.1, min_order_notional=1)
     broker.submit(
         {
             "strategy_name": "trend_following",
