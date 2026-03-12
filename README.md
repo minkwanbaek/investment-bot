@@ -43,7 +43,7 @@ pytest -q
 - Upbit read-only keys are loaded from `.env` via `UPBIT_ACCESS_KEY` / `UPBIT_SECRET_KEY`
 - Live mode controls: `INVESTMENT_BOT_LIVE_MODE` (`paper|shadow|live`), `INVESTMENT_BOT_CONFIRM_LIVE_TRADING` (`true|false`)
 - Execution cost defaults: `INVESTMENT_BOT_TRADING_FEE_PCT=0.05`, `INVESTMENT_BOT_SLIPPAGE_PCT=0.05`
-- Safety limits: `min_order_notional=0` by default, `max_consecutive_buys=3`, `max_symbol_exposure_pct=25` (configurable via `config/app.yml`)
+- Safety limits: `min_order_notional=5000` for KRW-market practical operation, `max_consecutive_buys=3`, `max_symbol_exposure_pct=25` (configurable via `config/app.yml`)
 
 ## API
 - `GET /health` - service health plus active symbols/base currency

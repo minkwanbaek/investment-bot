@@ -24,6 +24,19 @@ class UpbitClient:
     def get_markets(self, is_details: bool = False) -> list[dict]:
         return self._request("GET", "/v1/market/all", params={"isDetails": str(is_details).lower()}, auth=False)
 
+    def create_limit_order(self, market: str, side: str, volume: str, price: str, ord_type: str = "limit") -> dict:
+        return self._request(
+            "POST",
+            "/v1/orders",
+            params={
+                "market": market,
+                "side": side,
+                "volume": volume,
+                "price": price,
+                "ord_type": ord_type,
+            },
+        )
+
     def _request(self, method: str, path: str, params: dict | None = None, auth: bool = True) -> list[dict] | dict:
         headers = {"accept": "application/json"}
         if auth:
@@ -52,11 +65,11 @@ class UpbitClient:
         return self._encode_hs256(payload, self.secret_key)
 
     def _encode_hs256(self, payload: dict, secret: str) -> str:
-        header = {"alg": "HS256", "typ": "JWT"}
+        header = {"alg": "HS512", "typ": "JWT"}
 
         def b64url(data: bytes) -> str:
             return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
         signing_input = f"{b64url(json.dumps(header, separators=(',', ':')).encode())}.{b64url(json.dumps(payload, separators=(',', ':')).encode())}"
-        signature = hmac.new(secret.encode(), signing_input.encode(), hashlib.sha256).digest()
+        signature = hmac.new(secret.encode(), signing_input.encode(), hashlib.sha512).digest()
         return f"{signing_input}.{b64url(signature)}"

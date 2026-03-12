@@ -51,3 +51,5 @@ def test_live_execution_submits_when_live_mode_and_confirmation_are_enabled(tmp_
     assert submitted["status"] == "submitted"
     assert submitted["order"]["uuid"] == "test-order"
     assert submitted["submitted_payload"]["market"] == "KRW-BTC"
+    assert submitted["submitted_payload"]["side"] == "bid"
+    assert submitted["submitted_payload"]["ord_type"] == "limit"

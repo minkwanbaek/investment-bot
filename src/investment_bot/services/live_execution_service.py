@@ -57,9 +57,9 @@ class LiveExecutionService:
 
         order_payload = {
             "market": preview["market"],
-            "side": side,
-            "volume": str(volume),
-            "price": str(preview["normalized_price"]),
+            "side": self._to_upbit_side(side),
+            "volume": self._format_decimal(volume),
+            "price": self._format_decimal(preview["normalized_price"]),
             "ord_type": "limit",
         }
         response = self.upbit_client.create_limit_order(**order_payload)
@@ -78,3 +78,14 @@ class LiveExecutionService:
             "status": "submitted",
         })
         return result
+
+    def _format_decimal(self, value: float) -> str:
+        rendered = f"{value:.16f}".rstrip("0").rstrip(".")
+        return rendered or "0"
+
+    def _to_upbit_side(self, side: str) -> str:
+        if side == "buy":
+            return "bid"
+        if side == "sell":
+            return "ask"
+        return side

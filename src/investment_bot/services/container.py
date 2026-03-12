@@ -52,7 +52,10 @@ def get_paper_broker() -> PaperBroker:
 @lru_cache
 def get_risk_controller() -> RiskController:
     settings = get_settings()
-    return RiskController(max_confidence_position_scale=settings.max_risk_per_trade_pct / 100)
+    return RiskController(
+        max_confidence_position_scale=settings.max_risk_per_trade_pct / 100,
+        min_order_notional=max(settings.min_order_notional, 5000.0 if settings.base_currency == "KRW" else 0.0),
+    )
 
 
 @lru_cache
