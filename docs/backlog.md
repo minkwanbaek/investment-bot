@@ -15,7 +15,8 @@
 - [x] Backtest harness
 - [x] Metrics service
 - [x] Alert service
-- [ ] Config validation UI/API
+- [x] Config validation UI/API
+- [x] Runtime health API for VM/QMD preflight checks
 - [x] Position average price / realized PnL / unrealized PnL in paper broker
 - [x] Market data adapter interface for live and replay inputs
 

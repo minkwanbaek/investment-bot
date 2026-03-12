@@ -49,6 +49,7 @@ pytest -q
 - `GET /health` - service health plus active symbols/base currency
 - `GET /config` - resolved runtime settings
 - `GET /config/validate` - validate resolved runtime settings and report issues/warnings
+- `GET /operator/runtime-health` - inspect local VM load/memory/QMD contention before running heavier local batches
 - `GET /strategies` - registered and enabled strategies
 - `GET /paper/portfolio` - paper portfolio snapshot plus threshold-based alerts
 - `GET /paper/export` - export current paper broker state
