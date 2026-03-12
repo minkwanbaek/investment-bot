@@ -253,3 +253,12 @@ def test_export_and_reset_endpoints_manage_operator_state():
     runs_reset = client.post("/runs/reset")
     assert runs_reset.status_code == 200
     assert runs_reset.json()["status"] == "cleared"
+
+
+def test_operator_drift_report_endpoint_returns_no_shadow_data_before_first_shadow_run():
+    client.post("/runs/reset")
+    response = client.get("/operator/drift-report?limit=10")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "no_shadow_data"
+    assert body["shadow_reference"] is None

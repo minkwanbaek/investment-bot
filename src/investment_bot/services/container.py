@@ -8,6 +8,7 @@ from investment_bot.services.alert_service import AlertService
 from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.candle_store import CandleStore
 from investment_bot.services.config_service import ConfigService
+from investment_bot.services.drift_report_service import DriftReportService
 from investment_bot.services.exchange_rules_service import ExchangeRulesService
 from investment_bot.services.fail_safe_service import FailSafeService
 from investment_bot.services.ledger_store import LedgerStore
@@ -106,6 +107,14 @@ def get_account_service() -> AccountService:
 @lru_cache
 def get_exchange_rules_service() -> ExchangeRulesService:
     return ExchangeRulesService(upbit_client=get_upbit_client())
+
+
+@lru_cache
+def get_drift_report_service() -> DriftReportService:
+    return DriftReportService(
+        run_history_service=get_run_history_service(),
+        paper_broker=get_paper_broker(),
+    )
 
 
 @lru_cache
