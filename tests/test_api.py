@@ -58,17 +58,6 @@ def test_config_validation_endpoint_returns_valid_result():
     assert body["issues"] == []
 
 
-def test_runtime_health_endpoint_returns_operator_preflight_shape():
-    response = client.get("/operator/runtime-health")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] in {"ok", "warning", "critical"}
-    assert "safe_for_batch" in body
-    assert "cpu" in body
-    assert "memory" in body
-    assert "qmd_activity" in body
-
-
 def test_portfolio_endpoint_returns_empty_snapshot():
     response = client.get("/paper/portfolio")
     assert response.status_code == 200

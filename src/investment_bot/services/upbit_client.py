@@ -24,19 +24,6 @@ class UpbitClient:
     def get_markets(self, is_details: bool = False) -> list[dict]:
         return self._request("GET", "/v1/market/all", params={"isDetails": str(is_details).lower()}, auth=False)
 
-    def create_limit_order(self, market: str, side: str, volume: str, price: str, ord_type: str = "limit") -> dict:
-        return self._request(
-            "POST",
-            "/v1/orders",
-            params={
-                "market": market,
-                "side": side,
-                "volume": volume,
-                "price": price,
-                "ord_type": ord_type,
-            },
-        )
-
     def _request(self, method: str, path: str, params: dict | None = None, auth: bool = True) -> list[dict] | dict:
         headers = {"accept": "application/json"}
         if auth:

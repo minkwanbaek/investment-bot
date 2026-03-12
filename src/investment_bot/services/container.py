@@ -17,7 +17,6 @@ from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.run_history_store import RunHistoryStore
-from investment_bot.services.runtime_health_service import RuntimeHealthService
 from investment_bot.services.scheduler_service import SchedulerService
 from investment_bot.services.semi_live_service import SemiLiveService
 from investment_bot.services.shadow_service import ShadowService
@@ -91,11 +90,6 @@ def get_run_history_service() -> RunHistoryService:
 @lru_cache
 def get_visualization_service() -> VisualizationService:
     return VisualizationService(run_history_service=get_run_history_service())
-
-
-@lru_cache
-def get_runtime_health_service() -> RuntimeHealthService:
-    return RuntimeHealthService()
 
 
 @lru_cache
