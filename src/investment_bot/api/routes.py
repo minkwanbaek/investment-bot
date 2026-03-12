@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
@@ -94,6 +97,12 @@ def config() -> dict:
 @router.get("/config/validate")
 def validate_config() -> dict:
     return get_config_service().validate()
+
+
+@router.get("/dashboard", response_class=FileResponse)
+def dashboard() -> FileResponse:
+    dashboard_path = Path(__file__).resolve().parent.parent / "static" / "dashboard.html"
+    return FileResponse(dashboard_path)
 
 
 @router.get("/strategies")
@@ -402,6 +411,20 @@ def summarize_recent_runs(limit: int = 20) -> dict:
 @router.get("/operator/drift-report")
 def operator_drift_report(limit: int = 50) -> dict:
     return get_drift_report_service().summarize(limit=limit)
+
+
+@router.get("/operator/live-dashboard")
+def operator_live_dashboard(limit: int = 20) -> dict:
+    recent_runs = get_run_history_service().list_recent(limit=limit)
+    return {
+        "health": health(),
+        "summary": get_run_history_service().summarize_recent(limit=limit),
+        "paper_portfolio": paper_portfolio(),
+        "profit_structure": get_visualization_service().summarize_profit_structure(limit=max(limit, 10)),
+        "drift_report": get_drift_report_service().summarize(limit=max(limit, 10)),
+        "recent_runs": recent_runs,
+        "latest_run": recent_runs[-1] if recent_runs else None,
+    }
 
 
 @router.get("/visualizations/profit-structure")

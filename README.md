@@ -47,6 +47,7 @@ pytest -q
 
 ## API
 - `GET /health` - service health plus active symbols/base currency
+- `GET /dashboard` - lightweight operator dashboard page for live monitoring in the browser
 - `GET /config` - resolved runtime settings
 - `GET /config/validate` - validate resolved runtime settings and report issues/warnings
 - `GET /strategies` - registered and enabled strategies
@@ -56,6 +57,7 @@ pytest -q
 - `GET /runs?limit=...` - list recent live tests / dry runs / backtests
 - `GET /runs/summary?limit=...` - operator dashboard summary for recent runs, stop reasons, and latest portfolio snapshot
 - `GET /operator/drift-report?limit=...` - compare current paper state against the latest shadow-cycle account snapshot to spot operational drift
+- `GET /operator/live-dashboard?limit=...` - bundled operator payload for the browser dashboard (summary + feed + charts + drift)
 - `GET /visualizations/profit-structure?limit=...` - chart-ready equity curve / PnL waterfall / stop-reason aggregates for dashboarding
 - `POST /runs/reset` - clear run history
 - `GET /market-data/adapters` - available market-data adapters (`mock`, `replay`, `live`)

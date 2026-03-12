@@ -42,6 +42,12 @@ def test_health_endpoint_exposes_runtime_config():
     assert body["symbols"] == ["BTC/KRW"]
 
 
+def test_dashboard_page_is_served():
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "Trading Bot Dashboard" in response.text
+
+
 def test_config_endpoint_returns_loaded_settings():
     response = client.get("/config")
     assert response.status_code == 200
@@ -56,6 +62,17 @@ def test_config_validation_endpoint_returns_valid_result():
     body = response.json()
     assert body["valid"] is True
     assert body["issues"] == []
+
+
+def test_live_dashboard_endpoint_returns_bundled_operator_payload():
+    response = client.get("/operator/live-dashboard?limit=10")
+    assert response.status_code == 200
+    body = response.json()
+    assert "health" in body
+    assert "summary" in body
+    assert "paper_portfolio" in body
+    assert "profit_structure" in body
+    assert "recent_runs" in body
 
 
 def test_portfolio_endpoint_returns_empty_snapshot():

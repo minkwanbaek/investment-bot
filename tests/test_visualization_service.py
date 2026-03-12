@@ -26,4 +26,5 @@ def test_visualization_service_builds_chart_ready_profit_structure(tmp_path):
     assert len(result["equity_curve"]) == 2
     assert len(result["pnl_waterfall"]) == 2
     assert result["stop_reason_counts"]["max_alerts_reached"] == 1
+    assert result["kind_counts"]["shadow_cycle"] == 1
     assert result["recommended_charts"][0]["type"] == "line"

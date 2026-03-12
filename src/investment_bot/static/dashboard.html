@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trading Bot Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">TRADING BOT</p>
+          <h1>운영 대시보드</h1>
+          <p class="sub">현재 봇이 무엇을 하고 있는지 실시간으로 보여주는 운영 콘솔</p>
+        </div>
+        <div class="hero-meta">
+          <div>Auto refresh <strong id="refresh-interval">3s</strong></div>
+          <div>Last updated <strong id="last-updated">-</strong></div>
+        </div>
+      </header>
+
+      <section class="cards" id="summary-cards"></section>
+
+      <section class="grid two">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>최근 활동</h2>
+            <span id="feed-count" class="muted"></span>
+          </div>
+          <div id="activity-feed" class="feed empty">아직 활동 기록이 없습니다.</div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>운영 상태</h2>
+          </div>
+          <div id="operator-status" class="stack"></div>
+        </article>
+      </section>
+
+      <section class="grid two">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Equity Curve</h2>
+          </div>
+          <div id="equity-chart" class="chart"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>PnL / Run Mix</h2>
+          </div>
+          <div id="distribution-chart" class="stack"></div>
+        </article>
+      </section>
+    </div>
+
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>
