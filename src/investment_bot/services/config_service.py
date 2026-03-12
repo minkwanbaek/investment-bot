@@ -49,5 +49,16 @@ class ConfigService:
                 },
                 "live_mode": self.settings.live_mode,
                 "confirm_live_trading": self.settings.confirm_live_trading,
+                "auto_trade": {
+                    "enabled": self.settings.auto_trade_enabled,
+                    "symbol": self.settings.auto_trade_symbol,
+                    "strategy_name": self.settings.auto_trade_strategy_name,
+                    "interval_seconds": self.settings.auto_trade_interval_seconds,
+                    "min_krw_balance": self.settings.auto_trade_min_krw_balance,
+                    "target_allocation_pct": self.settings.auto_trade_target_allocation_pct,
+                    "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
+                    "max_pending_seconds": self.settings.auto_trade_max_pending_seconds,
+                    "cooldown_cycles": self.settings.auto_trade_cooldown_cycles,
+                },
             },
         }

@@ -32,10 +32,25 @@ class StrategyToggleConfig(BaseModel):
     enabled: bool = True
 
 
+class AutoTradeConfig(BaseModel):
+    enabled: bool = False
+    symbol: str = "BTC/KRW"
+    strategy_name: str = "trend_following"
+    timeframe: str = "1h"
+    limit: int = 5
+    interval_seconds: int = 300
+    min_krw_balance: float = 15000.0
+    target_allocation_pct: float = 20.0
+    meaningful_order_notional: float = 10000.0
+    max_pending_seconds: int = 600
+    cooldown_cycles: int = 1
+
+
 class FileConfig(BaseModel):
     app: AppConfig = Field(default_factory=AppConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
+    auto_trade: AutoTradeConfig = Field(default_factory=AutoTradeConfig)
     strategies: dict[str, StrategyToggleConfig] = Field(default_factory=dict)
 
 
@@ -62,6 +77,17 @@ class Settings(BaseSettings):
     max_risk_per_trade_pct: float = 1.0
     max_daily_loss_pct: float = 3.0
     max_drawdown_pct: float = 10.0
+    auto_trade_enabled: bool = False
+    auto_trade_symbol: str = "BTC/KRW"
+    auto_trade_strategy_name: str = "trend_following"
+    auto_trade_timeframe: str = "1h"
+    auto_trade_limit: int = 5
+    auto_trade_interval_seconds: int = 300
+    auto_trade_min_krw_balance: float = 15000.0
+    auto_trade_target_allocation_pct: float = 20.0
+    auto_trade_meaningful_order_notional: float = 10000.0
+    auto_trade_max_pending_seconds: int = 600
+    auto_trade_cooldown_cycles: int = 1
     enabled_strategies: list[str] = Field(default_factory=lambda: ["trend_following", "mean_reversion", "dca"])
 
     model_config = SettingsConfigDict(env_prefix="INVESTMENT_BOT_", env_file=".env", extra="ignore")
@@ -109,5 +135,16 @@ def get_settings() -> Settings:
         max_risk_per_trade_pct=file_config.risk.max_risk_per_trade_pct,
         max_daily_loss_pct=file_config.risk.max_daily_loss_pct,
         max_drawdown_pct=file_config.risk.max_drawdown_pct,
+        auto_trade_enabled=file_config.auto_trade.enabled,
+        auto_trade_symbol=file_config.auto_trade.symbol,
+        auto_trade_strategy_name=file_config.auto_trade.strategy_name,
+        auto_trade_timeframe=file_config.auto_trade.timeframe,
+        auto_trade_limit=file_config.auto_trade.limit,
+        auto_trade_interval_seconds=file_config.auto_trade.interval_seconds,
+        auto_trade_min_krw_balance=file_config.auto_trade.min_krw_balance,
+        auto_trade_target_allocation_pct=file_config.auto_trade.target_allocation_pct,
+        auto_trade_meaningful_order_notional=file_config.auto_trade.meaningful_order_notional,
+        auto_trade_max_pending_seconds=file_config.auto_trade.max_pending_seconds,
+        auto_trade_cooldown_cycles=file_config.auto_trade.cooldown_cycles,
         enabled_strategies=enabled_strategies,
     )

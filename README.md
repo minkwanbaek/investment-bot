@@ -44,6 +44,7 @@ pytest -q
 - Live mode controls: `INVESTMENT_BOT_LIVE_MODE` (`paper|shadow|live`), `INVESTMENT_BOT_CONFIRM_LIVE_TRADING` (`true|false`)
 - Execution cost defaults: `INVESTMENT_BOT_TRADING_FEE_PCT=0.05`, `INVESTMENT_BOT_SLIPPAGE_PCT=0.05`
 - Safety limits: `min_order_notional=5000` for KRW-market practical operation, `max_consecutive_buys=3`, `max_symbol_exposure_pct=25` (configurable via `config/app.yml`)
+- Auto-trade profile is configurable under `auto_trade` in `config/app.yml` (interval, min KRW balance, target allocation, meaningful order threshold, pending-order TTL, cooldown)
 
 ## API
 - `GET /health` - service health plus active symbols/base currency
@@ -57,7 +58,11 @@ pytest -q
 - `GET /runs?limit=...` - list recent live tests / dry runs / backtests
 - `GET /runs/summary?limit=...` - operator dashboard summary for recent runs, stop reasons, and latest portfolio snapshot
 - `GET /operator/drift-report?limit=...` - compare current paper state against the latest shadow-cycle account snapshot to spot operational drift
-- `GET /operator/live-dashboard?limit=...` - bundled operator payload for the browser dashboard (summary + feed + charts + drift)
+- `GET /operator/live-dashboard?limit=...` - bundled operator payload for the browser dashboard (summary + feed + charts + drift + auto-trade status)
+- `GET /auto-trade/status` - inspect current auto-trade profile, active state, and last run result
+- `POST /auto-trade/start` - start the in-process auto-trade loop
+- `POST /auto-trade/stop` - stop the in-process auto-trade loop
+- `POST /auto-trade/run-once` - execute one auto-trade decision cycle immediately
 - `GET /visualizations/profit-structure?limit=...` - chart-ready equity curve / PnL waterfall / stop-reason aggregates for dashboarding
 - `POST /runs/reset` - clear run history
 - `GET /market-data/adapters` - available market-data adapters (`mock`, `replay`, `live`)

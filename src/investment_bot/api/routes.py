@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_account_service, get_alert_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client, get_visualization_service, get_drift_report_service
+from investment_bot.services.container import get_account_service, get_alert_service, get_auto_trade_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client, get_visualization_service, get_drift_report_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
@@ -422,9 +422,30 @@ def operator_live_dashboard(limit: int = 20) -> dict:
         "paper_portfolio": paper_portfolio(),
         "profit_structure": get_visualization_service().summarize_profit_structure(limit=max(limit, 10)),
         "drift_report": get_drift_report_service().summarize(limit=max(limit, 10)),
+        "auto_trade": get_auto_trade_service().status(),
         "recent_runs": recent_runs,
         "latest_run": recent_runs[-1] if recent_runs else None,
     }
+
+
+@router.get("/auto-trade/status")
+def auto_trade_status() -> dict:
+    return get_auto_trade_service().status()
+
+
+@router.post("/auto-trade/start")
+def auto_trade_start() -> dict:
+    return get_auto_trade_service().start()
+
+
+@router.post("/auto-trade/stop")
+def auto_trade_stop() -> dict:
+    return get_auto_trade_service().stop()
+
+
+@router.post("/auto-trade/run-once")
+def auto_trade_run_once() -> dict:
+    return get_auto_trade_service().run_once()
 
 
 @router.get("/visualizations/profit-structure")

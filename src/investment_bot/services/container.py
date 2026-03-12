@@ -5,6 +5,7 @@ from investment_bot.market_data.registry import build_default_market_data_regist
 from investment_bot.risk.controller import RiskController
 from investment_bot.services.account_service import AccountService
 from investment_bot.services.alert_service import AlertService
+from investment_bot.services.auto_trade_service import AutoTradeService
 from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.candle_store import CandleStore
 from investment_bot.services.config_service import ConfigService
@@ -177,4 +178,15 @@ def get_scheduler_service() -> SchedulerService:
         semi_live_service=get_semi_live_service(),
         run_history_service=get_run_history_service(),
         fail_safe_service=get_fail_safe_service(),
+    )
+
+
+@lru_cache
+def get_auto_trade_service() -> AutoTradeService:
+    return AutoTradeService(
+        settings=get_settings(),
+        shadow_service=get_shadow_service(),
+        live_execution_service=get_live_execution_service(),
+        account_service=get_account_service(),
+        run_history_service=get_run_history_service(),
     )

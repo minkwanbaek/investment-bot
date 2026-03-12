@@ -12,6 +12,18 @@ risk:
   max_risk_per_trade_pct: 1.0
   max_daily_loss_pct: 3.0
   max_drawdown_pct: 10.0
+auto_trade:
+  enabled: true
+  symbol: BTC/KRW
+  strategy_name: trend_following
+  timeframe: 1h
+  limit: 5
+  interval_seconds: 300
+  min_krw_balance: 15000
+  target_allocation_pct: 20.0
+  meaningful_order_notional: 10000
+  max_pending_seconds: 600
+  cooldown_cycles: 1
 strategies:
   trend_following:
     enabled: true

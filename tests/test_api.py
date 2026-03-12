@@ -72,7 +72,16 @@ def test_live_dashboard_endpoint_returns_bundled_operator_payload():
     assert "summary" in body
     assert "paper_portfolio" in body
     assert "profit_structure" in body
+    assert "auto_trade" in body
     assert "recent_runs" in body
+
+
+def test_auto_trade_status_endpoint_returns_profile():
+    response = client.get("/auto-trade/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert "profile" in body
+    assert "active" in body
 
 
 def test_portfolio_endpoint_returns_empty_snapshot():
