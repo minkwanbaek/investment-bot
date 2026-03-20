@@ -44,6 +44,10 @@ class AutoTradeConfig(BaseModel):
     meaningful_order_notional: float = 10000.0
     max_pending_seconds: int = 600
     cooldown_cycles: int = 1
+    stop_loss_pct: float = 1.5
+    partial_take_profit_pct: float = 2.0
+    trailing_stop_pct: float = 1.0
+    partial_sell_ratio: float = 0.5
 
 
 class FileConfig(BaseModel):
@@ -88,6 +92,10 @@ class Settings(BaseSettings):
     auto_trade_meaningful_order_notional: float = 10000.0
     auto_trade_max_pending_seconds: int = 600
     auto_trade_cooldown_cycles: int = 1
+    auto_trade_stop_loss_pct: float = 1.5
+    auto_trade_partial_take_profit_pct: float = 2.0
+    auto_trade_trailing_stop_pct: float = 1.0
+    auto_trade_partial_sell_ratio: float = 0.5
     enabled_strategies: list[str] = Field(default_factory=lambda: ["trend_following", "mean_reversion", "dca"])
 
     model_config = SettingsConfigDict(env_prefix="INVESTMENT_BOT_", env_file=".env", extra="ignore")
@@ -146,5 +154,9 @@ def get_settings() -> Settings:
         auto_trade_meaningful_order_notional=file_config.auto_trade.meaningful_order_notional,
         auto_trade_max_pending_seconds=file_config.auto_trade.max_pending_seconds,
         auto_trade_cooldown_cycles=file_config.auto_trade.cooldown_cycles,
+        auto_trade_stop_loss_pct=file_config.auto_trade.stop_loss_pct,
+        auto_trade_partial_take_profit_pct=file_config.auto_trade.partial_take_profit_pct,
+        auto_trade_trailing_stop_pct=file_config.auto_trade.trailing_stop_pct,
+        auto_trade_partial_sell_ratio=file_config.auto_trade.partial_sell_ratio,
         enabled_strategies=enabled_strategies,
     )

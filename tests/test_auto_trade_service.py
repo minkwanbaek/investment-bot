@@ -33,15 +33,16 @@ class FakeLiveExecutionService:
 
 
 class FakeAccountService:
-    def __init__(self, krw_cash: float, asset_balance: float = 0.0):
+    def __init__(self, krw_cash: float, asset_balance: float = 0.0, avg_buy_price: float = 1000.0):
         self.krw_cash = krw_cash
         self.asset_balance = asset_balance
+        self.avg_buy_price = avg_buy_price
 
     def summarize_upbit_balances(self):
         return {"exchange": "upbit", "krw_cash": self.krw_cash, "asset_count": 0, "assets": []}
 
     def get_asset_balance(self, symbol: str):
-        return {"currency": symbol.split('/')[0], "balance": self.asset_balance, "locked": 0.0, "total_balance": self.asset_balance, "avg_buy_price": 1000.0, "estimated_cost_basis": self.asset_balance * 1000.0}
+        return {"currency": symbol.split('/')[0], "balance": self.asset_balance, "locked": 0.0, "total_balance": self.asset_balance, "avg_buy_price": self.avg_buy_price, "estimated_cost_basis": self.asset_balance * self.avg_buy_price}
 
 
 def test_auto_trade_service_skips_when_krw_balance_is_below_threshold(tmp_path):
@@ -127,3 +128,40 @@ def test_auto_trade_service_skips_sell_when_exchange_balance_is_empty(tmp_path):
 
     assert result['status'] == 'skipped'
     assert result['reason'] == 'insufficient_asset_balance'
+
+
+def test_auto_trade_service_triggers_stop_loss_from_price_pct_even_with_small_btc_quantity(tmp_path):
+    history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
+    service = AutoTradeService(
+        settings=Settings(auto_trade_stop_loss_pct=1.5, auto_trade_partial_take_profit_pct=2.0, auto_trade_trailing_stop_pct=1.0, auto_trade_partial_sell_ratio=0.5),
+        shadow_service=FakeShadowService(action="hold", latest_price=98000.0),
+        live_execution_service=FakeLiveExecutionService(),
+        account_service=FakeAccountService(krw_cash=0.0, asset_balance=0.00060394, avg_buy_price=100000.0),
+        run_history_service=history,
+    )
+
+    result = service.run_once()
+
+    assert result['status'] == 'submitted'
+    assert result['side'] == 'sell'
+    assert result['override']['override_reason'] == 'stop_loss'
+    assert result['submit']['volume'] == 0.00060394
+
+
+def test_auto_trade_service_triggers_partial_take_profit_with_trailing_stop(tmp_path):
+    history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
+    service = AutoTradeService(
+        settings=Settings(auto_trade_stop_loss_pct=1.5, auto_trade_partial_take_profit_pct=2.0, auto_trade_trailing_stop_pct=1.0, auto_trade_partial_sell_ratio=0.5),
+        shadow_service=FakeShadowService(action="hold", latest_price=102000.0),
+        live_execution_service=FakeLiveExecutionService(),
+        account_service=FakeAccountService(krw_cash=0.0, asset_balance=0.00060394, avg_buy_price=100000.0),
+        run_history_service=history,
+    )
+    service._peak_price_by_symbol['BTC/KRW'] = 103500.0
+
+    result = service.run_once()
+
+    assert result['status'] == 'submitted'
+    assert result['side'] == 'sell'
+    assert result['override']['override_reason'] == 'take_profit_trailing_stop'
+    assert result['submit']['volume'] == 0.00030197
