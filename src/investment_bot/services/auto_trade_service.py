@@ -93,7 +93,13 @@ class AutoTradeService:
             regime = shadow["decision"].get("market_regime", {})
             asset = self.account_service.get_asset_balance(symbol)
             latest_price = float(review.get("latest_price", 0.0) or 0.0)
-            override = self._exit_override(symbol=symbol, asset=asset, latest_price=latest_price)
+            managed_notional = float(asset.get("estimated_cost_basis", 0.0) or 0.0)
+            if managed_notional < self.settings.auto_trade_min_managed_position_notional:
+                asset = {**asset, "managed": False, "managed_notional": managed_notional}
+                override = None
+            else:
+                asset = {**asset, "managed": True, "managed_notional": managed_notional}
+                override = self._exit_override(symbol=symbol, asset=asset, latest_price=latest_price)
             action = override["action"] if override is not None else review.get("action")
             candidates.append({
                 "symbol": symbol,
@@ -168,6 +174,13 @@ class AutoTradeService:
 
     def _handle_sell(self, chosen: dict) -> dict:
         asset = chosen["asset"]
+        if asset.get("managed") is False:
+            result = {
+                "status": "skipped",
+                "reason": "below_min_managed_position_notional",
+                "chosen": chosen,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
         available_volume = float(asset.get("balance", 0.0))
         if available_volume <= 0:
             result = {

@@ -49,6 +49,7 @@ class AutoTradeConfig(BaseModel):
     trailing_stop_pct: float = 1.0
     partial_sell_ratio: float = 0.5
     max_total_exposure_pct: float = 60.0
+    min_managed_position_notional: float = 10000.0
 
 
 class FileConfig(BaseModel):
@@ -98,6 +99,7 @@ class Settings(BaseSettings):
     auto_trade_trailing_stop_pct: float = 1.0
     auto_trade_partial_sell_ratio: float = 0.5
     auto_trade_max_total_exposure_pct: float = 60.0
+    auto_trade_min_managed_position_notional: float = 10000.0
     enabled_strategies: list[str] = Field(default_factory=lambda: ["trend_following", "mean_reversion", "dca"])
 
     model_config = SettingsConfigDict(env_prefix="INVESTMENT_BOT_", env_file=".env", extra="ignore")
@@ -160,5 +162,7 @@ def get_settings() -> Settings:
         auto_trade_partial_take_profit_pct=file_config.auto_trade.partial_take_profit_pct,
         auto_trade_trailing_stop_pct=file_config.auto_trade.trailing_stop_pct,
         auto_trade_partial_sell_ratio=file_config.auto_trade.partial_sell_ratio,
+        auto_trade_max_total_exposure_pct=file_config.auto_trade.max_total_exposure_pct,
+        auto_trade_min_managed_position_notional=file_config.auto_trade.min_managed_position_notional,
         enabled_strategies=enabled_strategies,
     )

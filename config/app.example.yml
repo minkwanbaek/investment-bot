@@ -6,6 +6,8 @@ trading:
   base_currency: KRW
   symbols:
     - BTC/KRW
+    - ETH/KRW
+    - SOL/KRW
 risk:
   max_risk_per_trade_pct: 1.0
   max_daily_loss_pct: 3.0
@@ -27,6 +29,7 @@ auto_trade:
   trailing_stop_pct: 1.0
   partial_sell_ratio: 0.5
   max_total_exposure_pct: 60.0
+  min_managed_position_notional: 10000.0
 strategies:
   trend_following:
     enabled: true
