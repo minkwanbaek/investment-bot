@@ -28,6 +28,7 @@ auto_trade:
   partial_take_profit_pct: 2.0
   trailing_stop_pct: 1.0
   partial_sell_ratio: 0.5
+  max_total_exposure_pct: 60.0
 strategies:
   trend_following:
     enabled: true

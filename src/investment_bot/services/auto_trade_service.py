@@ -28,6 +28,7 @@ class AutoTradeService:
         return {
             "enabled": self.settings.auto_trade_enabled,
             "symbol": self.settings.auto_trade_symbol,
+            "symbols": self.settings.symbols,
             "strategy_name": self.settings.auto_trade_strategy_name,
             "timeframe": self.settings.auto_trade_timeframe,
             "limit": self.settings.auto_trade_limit,
@@ -41,6 +42,7 @@ class AutoTradeService:
             "partial_take_profit_pct": self.settings.auto_trade_partial_take_profit_pct,
             "trailing_stop_pct": self.settings.auto_trade_trailing_stop_pct,
             "partial_sell_ratio": self.settings.auto_trade_partial_sell_ratio,
+            "max_total_exposure_pct": self.settings.auto_trade_max_total_exposure_pct,
         }
 
     def status(self) -> dict:
@@ -70,7 +72,6 @@ class AutoTradeService:
     def run_once(self) -> dict:
         account = self.account_service.summarize_upbit_balances()
         krw_cash = float(account.get("krw_cash", 0.0))
-        symbol = self.settings.auto_trade_symbol
 
         if self._cooldown_active():
             result = {
@@ -80,87 +81,114 @@ class AutoTradeService:
             }
             return self._remember(result, record_kind="auto_trade_skip")
 
-        shadow = self.shadow_service.run_once(
-            strategy_name=self.settings.auto_trade_strategy_name,
-            symbol=symbol,
-            timeframe=self.settings.auto_trade_timeframe,
-            limit=self.settings.auto_trade_limit,
-        )
-        review = shadow["decision"]["review"]
-        action = review.get("action")
-        latest_price = float(review.get("latest_price", 0.0) or 0.0)
-        asset = self.account_service.get_asset_balance(symbol)
-        override = self._exit_override(symbol=symbol, asset=asset, latest_price=latest_price)
-        if override is not None:
-            action = override["action"]
-
-        if action == "buy":
-            if krw_cash < self.settings.auto_trade_min_krw_balance:
-                result = {
-                    "status": "skipped",
-                    "reason": "insufficient_krw_balance",
-                    "krw_cash": krw_cash,
-                    "required_min_krw": self.settings.auto_trade_min_krw_balance,
-                    "shadow": shadow,
-                }
-                return self._remember(result, record_kind="auto_trade_skip")
-
-            allocation_cap = min(
-                krw_cash * (self.settings.auto_trade_target_allocation_pct / 100),
-                krw_cash,
+        candidates = []
+        for symbol in self.settings.symbols:
+            shadow = self.shadow_service.run_once(
+                strategy_name=self.settings.auto_trade_strategy_name,
+                symbol=symbol,
+                timeframe=self.settings.auto_trade_timeframe,
+                limit=self.settings.auto_trade_limit,
             )
-            reviewed_target = float(review.get("target_notional", 0.0) or 0.0)
-            target_notional = min(allocation_cap, reviewed_target if reviewed_target > 0 else allocation_cap)
-            target_notional = max(target_notional, self.settings.min_order_notional)
-            target_notional = min(target_notional, krw_cash)
-            if target_notional < self.settings.auto_trade_meaningful_order_notional:
-                result = {
-                    "status": "skipped",
-                    "reason": "below_meaningful_order_notional",
-                    "target_notional": round(target_notional, 4),
-                    "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
-                    "shadow": shadow,
-                }
-                return self._remember(result, record_kind="auto_trade_skip")
+            review = shadow["decision"]["review"]
+            regime = shadow["decision"].get("market_regime", {})
+            asset = self.account_service.get_asset_balance(symbol)
+            latest_price = float(review.get("latest_price", 0.0) or 0.0)
+            override = self._exit_override(symbol=symbol, asset=asset, latest_price=latest_price)
+            action = override["action"] if override is not None else review.get("action")
+            candidates.append({
+                "symbol": symbol,
+                "shadow": shadow,
+                "review": review,
+                "asset": asset,
+                "regime": regime,
+                "override": override,
+                "action": action,
+                "confidence": float(review.get("confidence", 0.0) or 0.0),
+                "latest_price": latest_price,
+            })
 
-            price = latest_price
-            volume = round(target_notional / price, 8)
-            return self._submit_trade(action="buy", price=price, volume=volume, shadow=shadow)
+        sell_candidates = [c for c in candidates if c["action"] == "sell"]
+        if sell_candidates:
+            chosen = max(sell_candidates, key=lambda c: (1 if c["override"] else 0, c["confidence"]))
+            return self._handle_sell(chosen)
 
-        if action == "sell":
-            available_volume = float(asset.get("balance", 0.0))
-            if available_volume <= 0:
-                result = {
-                    "status": "skipped",
-                    "reason": "insufficient_asset_balance",
-                    "asset": asset,
-                    "shadow": shadow,
-                }
-                return self._remember(result, record_kind="auto_trade_skip")
-            price = latest_price
-            if override is not None:
-                sell_ratio = float(override.get("sell_ratio", 1.0))
-            else:
-                confidence = float(review.get("confidence", 0.0) or 0.0)
-                sell_ratio = min(max(confidence, 0.25), 1.0)
-            volume = round(available_volume * sell_ratio, 8)
-            if volume <= 0:
-                result = {
-                    "status": "skipped",
-                    "reason": "sell_volume_zero_after_sizing",
-                    "asset": asset,
-                    "shadow": shadow,
-                }
-                return self._remember(result, record_kind="auto_trade_skip")
-            return self._submit_trade(action="sell", price=price, volume=volume, shadow=shadow, override=override)
+        buy_candidates = [c for c in candidates if c["action"] == "buy"]
+        if buy_candidates:
+            chosen = max(buy_candidates, key=lambda c: c["confidence"])
+            return self._handle_buy(chosen, krw_cash=krw_cash, account=account)
 
         result = {
             "status": "skipped",
             "reason": "non_actionable_signal",
-            "shadow": shadow,
-            "asset": asset,
+            "candidates": candidates,
         }
         return self._remember(result, record_kind="auto_trade_skip")
+
+    def _handle_buy(self, chosen: dict, krw_cash: float, account: dict) -> dict:
+        if krw_cash < self.settings.auto_trade_min_krw_balance:
+            result = {
+                "status": "skipped",
+                "reason": "insufficient_krw_balance",
+                "krw_cash": krw_cash,
+                "required_min_krw": self.settings.auto_trade_min_krw_balance,
+                "chosen": chosen,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
+
+        current_exposure = sum(float(asset.get("estimated_cost_basis", 0.0) or 0.0) for asset in account.get("assets", []))
+        total_equity = krw_cash + current_exposure
+        allocation_cap = min(
+            krw_cash * (self.settings.auto_trade_target_allocation_pct / 100),
+            krw_cash,
+        )
+        review = chosen["review"]
+        reviewed_target = float(review.get("target_notional", 0.0) or 0.0)
+        target_notional = min(allocation_cap, reviewed_target if reviewed_target > 0 else allocation_cap)
+        max_total_exposure_value = total_equity * (self.settings.auto_trade_max_total_exposure_pct / 100)
+        remaining_exposure_room = max(0.0, max_total_exposure_value - current_exposure)
+        target_notional = min(target_notional, remaining_exposure_room)
+        target_notional = max(target_notional, self.settings.min_order_notional) if remaining_exposure_room >= self.settings.min_order_notional else target_notional
+        target_notional = min(target_notional, krw_cash)
+
+        if target_notional < self.settings.auto_trade_meaningful_order_notional:
+            result = {
+                "status": "skipped",
+                "reason": "below_meaningful_order_notional_or_total_exposure_limit",
+                "target_notional": round(target_notional, 4),
+                "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
+                "current_exposure": round(current_exposure, 4),
+                "max_total_exposure_value": round(max_total_exposure_value, 4),
+                "chosen": chosen,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
+
+        price = chosen["latest_price"]
+        volume = round(target_notional / price, 8)
+        return self._submit_trade(symbol=chosen["symbol"], action="buy", price=price, volume=volume, shadow=chosen["shadow"], override=chosen["override"], extra={"chosen": chosen})
+
+    def _handle_sell(self, chosen: dict) -> dict:
+        asset = chosen["asset"]
+        available_volume = float(asset.get("balance", 0.0))
+        if available_volume <= 0:
+            result = {
+                "status": "skipped",
+                "reason": "insufficient_asset_balance",
+                "chosen": chosen,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
+        if chosen["override"] is not None:
+            sell_ratio = float(chosen["override"].get("sell_ratio", 1.0))
+        else:
+            sell_ratio = min(max(chosen["confidence"], 0.25), 1.0)
+        volume = round(available_volume * sell_ratio, 8)
+        if volume <= 0:
+            result = {
+                "status": "skipped",
+                "reason": "sell_volume_zero_after_sizing",
+                "chosen": chosen,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
+        return self._submit_trade(symbol=chosen["symbol"], action="sell", price=chosen["latest_price"], volume=volume, shadow=chosen["shadow"], override=chosen["override"], extra={"chosen": chosen})
 
     def _exit_override(self, symbol: str, asset: dict, latest_price: float) -> dict | None:
         balance = float(asset.get("balance", 0.0) or 0.0)
@@ -177,57 +205,22 @@ class AutoTradeService:
         drawdown_from_peak_pct = ((peak - latest_price) / peak) * 100 if peak > 0 else 0.0
 
         if pnl_pct <= -self.settings.auto_trade_stop_loss_pct:
-            return {
-                "action": "sell",
-                "override_reason": "stop_loss",
-                "sell_ratio": 1.0,
-                "pnl_pct": round(pnl_pct, 4),
-                "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4),
-            }
+            return {"action": "sell", "override_reason": "stop_loss", "sell_ratio": 1.0, "pnl_pct": round(pnl_pct, 4), "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4)}
 
         if pnl_pct >= self.settings.auto_trade_partial_take_profit_pct and drawdown_from_peak_pct >= self.settings.auto_trade_trailing_stop_pct:
-            return {
-                "action": "sell",
-                "override_reason": "take_profit_trailing_stop",
-                "sell_ratio": self.settings.auto_trade_partial_sell_ratio,
-                "pnl_pct": round(pnl_pct, 4),
-                "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4),
-            }
+            return {"action": "sell", "override_reason": "take_profit_trailing_stop", "sell_ratio": self.settings.auto_trade_partial_sell_ratio, "pnl_pct": round(pnl_pct, 4), "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4)}
 
         return None
 
-    def _submit_trade(self, action: str, price: float, volume: float, shadow: dict, override: dict | None = None) -> dict:
-        preview = self.live_execution_service.preview_order(
-            symbol=self.settings.auto_trade_symbol,
-            side=action,
-            price=price,
-            volume=volume,
-        )
+    def _submit_trade(self, symbol: str, action: str, price: float, volume: float, shadow: dict, override: dict | None = None, extra: dict | None = None) -> dict:
+        preview = self.live_execution_service.preview_order(symbol=symbol, side=action, price=price, volume=volume)
         if not preview.get("allowed"):
-            result = {
-                "status": "skipped",
-                "reason": "preview_blocked",
-                "preview": preview,
-                "shadow": shadow,
-                "override": override,
-            }
+            result = {"status": "skipped", "reason": "preview_blocked", "preview": preview, "shadow": shadow, "override": override, **(extra or {})}
             return self._remember(result, record_kind="auto_trade_skip")
 
-        submit = self.live_execution_service.submit_order(
-            symbol=self.settings.auto_trade_symbol,
-            side=action,
-            price=price,
-            volume=volume,
-        )
+        submit = self.live_execution_service.submit_order(symbol=symbol, side=action, price=price, volume=volume)
         self._last_submitted_at = datetime.now(timezone.utc)
-        result = {
-            "status": "submitted",
-            "side": action,
-            "shadow": shadow,
-            "preview": preview,
-            "submit": submit,
-            "override": override,
-        }
+        result = {"status": "submitted", "symbol": symbol, "side": action, "shadow": shadow, "preview": preview, "submit": submit, "override": override, **(extra or {})}
         return self._remember(result, record_kind="auto_trade_submit")
 
     def _cooldown_active(self) -> bool:

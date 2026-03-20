@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from statistics import mean
 from typing import Sequence
 
 from investment_bot.models.market import Candle
@@ -23,6 +24,17 @@ class TradingCycleService:
         strategy = strategy_cls()
         signal: TradeSignal = strategy.generate_signal(candles)
         latest_price = candles[-1].close
+        regime = self._classify_market(candles)
+
+        if strategy_name == "trend_following" and regime["regime"] == "ranging":
+            signal = TradeSignal(
+                strategy_name=signal.strategy_name,
+                symbol=signal.symbol,
+                action="hold",
+                confidence=signal.confidence,
+                reason=f"market_regime=ranging; {signal.reason}",
+            )
+
         review = self.risk_controller.review(
             signal,
             cash_balance=self.paper_broker.cash_balance,
@@ -35,6 +47,33 @@ class TradingCycleService:
             "strategy": strategy_name,
             "signal": signal.model_dump(),
             "review": review,
+            "market_regime": regime,
             "broker_result": broker_result,
             "portfolio": self.paper_broker.portfolio_snapshot(),
+        }
+
+    def _classify_market(self, candles: Sequence[Candle]) -> dict:
+        closes = [c.close for c in candles]
+        if len(closes) < 8:
+            return {"regime": "unknown", "reason": "insufficient_data"}
+        short_ma = mean(closes[-3:])
+        long_ma = mean(closes[-8:])
+        latest = closes[-1]
+        prev = closes[-2]
+        trend_gap_pct = ((short_ma - long_ma) / long_ma) if long_ma else 0.0
+        range_pct = ((max(closes[-8:]) - min(closes[-8:])) / min(closes[-8:])) if min(closes[-8:]) else 0.0
+        momentum_pct = ((latest - prev) / prev) if prev else 0.0
+        if range_pct < 0.01 or abs(trend_gap_pct) < 0.0015:
+            regime = "ranging"
+        elif trend_gap_pct > 0 and momentum_pct > 0:
+            regime = "uptrend"
+        elif trend_gap_pct < 0 and momentum_pct < 0:
+            regime = "downtrend"
+        else:
+            regime = "mixed"
+        return {
+            "regime": regime,
+            "trend_gap_pct": round(trend_gap_pct, 6),
+            "range_pct": round(range_pct, 6),
+            "momentum_pct": round(momentum_pct, 6),
         }

@@ -59,6 +59,11 @@ class ConfigService:
                     "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
                     "max_pending_seconds": self.settings.auto_trade_max_pending_seconds,
                     "cooldown_cycles": self.settings.auto_trade_cooldown_cycles,
+                    "stop_loss_pct": self.settings.auto_trade_stop_loss_pct,
+                    "partial_take_profit_pct": self.settings.auto_trade_partial_take_profit_pct,
+                    "trailing_stop_pct": self.settings.auto_trade_trailing_stop_pct,
+                    "partial_sell_ratio": self.settings.auto_trade_partial_sell_ratio,
+                    "max_total_exposure_pct": self.settings.auto_trade_max_total_exposure_pct,
                 },
             },
         }
