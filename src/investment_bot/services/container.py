@@ -189,4 +189,7 @@ def get_auto_trade_service() -> AutoTradeService:
         live_execution_service=get_live_execution_service(),
         account_service=get_account_service(),
         run_history_service=get_run_history_service(),
+        strategy_selection_service=StrategySelectionService(),
+    )
+history_service(),
     )
