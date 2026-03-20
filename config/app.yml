@@ -2,7 +2,7 @@ app:
   name: investment-bot
   environment: local
 trading:
-  mode: paper
+  mode: live
   base_currency: KRW
   symbols:
     - BTC/KRW
@@ -17,7 +17,7 @@ auto_trade:
   symbol: BTC/KRW
   strategy_name: trend_following
   timeframe: 1h
-  limit: 5
+  limit: 8
   interval_seconds: 300
   min_krw_balance: 15000
   target_allocation_pct: 20.0

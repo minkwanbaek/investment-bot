@@ -29,6 +29,9 @@ class PaperBroker:
         self.ledger_store = ledger_store
         self._load_state()
 
+    def _round_qty(self, quantity: float) -> float:
+        return round(quantity, 8)
+
     def _load_state(self) -> None:
         if not self.ledger_store:
             return
@@ -57,6 +60,17 @@ class PaperBroker:
                 "portfolio": self.portfolio_snapshot(),
             }
         )
+
+    def sync_exchange_position(self, symbol: str, quantity: float, average_price: float, cash_balance: float | None = None) -> None:
+        position = self.positions.setdefault(
+            symbol,
+            {"quantity": 0.0, "average_price": 0.0, "realized_pnl": 0.0},
+        )
+        position["quantity"] = self._round_qty(max(quantity, 0.0))
+        position["average_price"] = round(max(average_price, 0.0), 4) if position["quantity"] > 0 else 0.0
+        if cash_balance is not None:
+            self.cash_balance = round(max(cash_balance, 0.0), 4)
+        self._persist_state()
 
     def submit(self, reviewed_signal: dict, execution_price: float) -> dict:
         action = reviewed_signal["action"]
@@ -111,7 +125,7 @@ class PaperBroker:
         if action == "buy":
             total_cost = (position["quantity"] * position["average_price"]) + notional_value + fee_paid
             new_quantity = position["quantity"] + approved_size
-            position["quantity"] = round(new_quantity, 4)
+            position["quantity"] = self._round_qty(new_quantity)
             position["average_price"] = round(total_cost / new_quantity, 4) if new_quantity else 0.0
             self.cash_balance = round(self.cash_balance - total_buy_cost, 4)
             self.consecutive_buys += 1
@@ -120,8 +134,9 @@ class PaperBroker:
             if sell_quantity <= 0:
                 return {"status": "rejected", "reason": "no_position_to_sell", "symbol": symbol}
             realized_pnl = ((executed_price - position["average_price"]) * sell_quantity) - fee_paid
-            position["quantity"] = round(position["quantity"] - sell_quantity, 4)
-            if position["quantity"] == 0:
+            position["quantity"] = self._round_qty(position["quantity"] - sell_quantity)
+            if position["quantity"] <= 0:
+                position["quantity"] = 0.0
                 position["average_price"] = 0.0
             position["realized_pnl"] = round(position["realized_pnl"] + realized_pnl, 4)
             self.total_realized_pnl = round(self.total_realized_pnl + realized_pnl, 4)

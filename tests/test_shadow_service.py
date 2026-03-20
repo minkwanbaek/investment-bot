@@ -1,42 +1,68 @@
-from investment_bot.services.account_service import AccountService
 from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.run_history_store import RunHistoryStore
 from investment_bot.services.shadow_service import ShadowService
 
 
-class FakeSemiLiveService:
-    def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5):
-        return {
-            "adapter": "live",
-            "strategy": strategy_name,
+class FakePaperBroker:
+    def __init__(self):
+        self.synced = None
+
+    def sync_exchange_position(self, symbol: str, quantity: float, average_price: float, cash_balance: float | None = None):
+        self.synced = {
             "symbol": symbol,
-            "timeframe": timeframe,
-            "limit": limit,
-            "portfolio": {"order_count": 1},
-            "broker_result": {"status": "recorded"},
+            "quantity": quantity,
+            "average_price": average_price,
+            "cash_balance": cash_balance,
         }
+
+
+class FakeSemiLiveService:
+    def __init__(self):
+        self.trading_cycle_service = type("T", (), {"paper_broker": FakePaperBroker()})()
+
+    def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5):
+        return {"strategy": strategy_name, "symbol": symbol, "timeframe": timeframe, "limit": limit}
 
 
 class FakeUpbitClient:
     def get_balances(self):
-        return [
-            {"currency": "KRW", "balance": "10000", "locked": "0", "avg_buy_price": "0", "unit_currency": "KRW"},
-            {"currency": "BTC", "balance": "0.001", "locked": "0", "avg_buy_price": "100000000", "unit_currency": "KRW"},
-        ]
+        return [{"currency": "KRW", "balance": "1000", "locked": "0"}]
 
 
-def test_shadow_service_runs_without_submitting_live_orders(tmp_path):
-    fake_client = FakeUpbitClient()
+class FakeAccountService:
+    def summarize_upbit_balances(self):
+        return {
+            "exchange": "upbit",
+            "krw_cash": 12345.0,
+            "asset_count": 1,
+            "assets": [{"currency": "BTC", "balance": 0.25, "avg_buy_price": 100000000.0}],
+        }
+
+    def get_asset_balance(self, symbol: str):
+        return {
+            "currency": "BTC",
+            "balance": 0.25,
+            "locked": 0.0,
+            "total_balance": 0.25,
+            "avg_buy_price": 100000000.0,
+            "estimated_cost_basis": 25000000.0,
+        }
+
+
+def test_shadow_service_syncs_exchange_balance_into_paper_broker(tmp_path):
+    semi_live = FakeSemiLiveService()
     service = ShadowService(
-        semi_live_service=FakeSemiLiveService(),
-        run_history_service=RunHistoryService(store=RunHistoryStore(str(tmp_path / "run_history.json"))),
-        upbit_client=fake_client,
-        account_service=AccountService(upbit_client=fake_client),
+        semi_live_service=semi_live,
+        run_history_service=RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json'))),
+        upbit_client=FakeUpbitClient(),
+        account_service=FakeAccountService(),
     )
 
-    result = service.run_once("trend_following", "BTC/KRW", "1h", 5)
-    assert result["mode"] == "shadow"
-    assert result["exchange_balance_count"] == 2
-    assert result["exchange_account_summary"]["asset_count"] == 1
-    assert result["live_order_submitted"] is False
-    assert result["decision"]["broker_result"]["status"] == "recorded"
+    result = service.run_once(strategy_name='trend_following', symbol='BTC/KRW', timeframe='1h', limit=8)
+
+    assert result['mode'] == 'shadow'
+    synced = semi_live.trading_cycle_service.paper_broker.synced
+    assert synced['symbol'] == 'BTC/KRW'
+    assert synced['quantity'] == 0.25
+    assert synced['average_price'] == 100000000.0
+    assert synced['cash_balance'] == 12345.0

@@ -70,3 +70,26 @@ def test_paper_broker_tracks_realized_pnl_on_sell():
     assert position["realized_pnl"] == 20.0
     assert snapshot["total_realized_pnl"] == 20.0
     assert snapshot["cash_balance"] == 960.0
+
+
+def test_paper_broker_preserves_small_crypto_quantities():
+    broker = PaperBroker(starting_cash=500000, trading_fee_pct=0.0, slippage_pct=0.0, min_order_notional=0.0)
+
+    broker.submit(
+        {
+            "strategy_name": "trend_following",
+            "symbol": "BTC/KRW",
+            "action": "buy",
+            "confidence": 0.2,
+            "size_scale": 0.00060394,
+            "reason": "small live-like buy",
+        },
+        execution_price=104500000,
+    )
+
+    snapshot = broker.portfolio_snapshot()
+    position = snapshot["positions"]["BTC/KRW"]
+
+    assert position["quantity"] == 0.00060394
+    assert position["cost_basis"] > 0
+    assert position["market_value"] > 0

@@ -15,13 +15,21 @@ class ShadowService:
 
     def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5) -> dict:
         balances = self.upbit_client.get_balances()
+        account_summary = self.account_service.summarize_upbit_balances() if self.account_service else None
+        if self.account_service:
+            asset = self.account_service.get_asset_balance(symbol)
+            self.semi_live_service.trading_cycle_service.paper_broker.sync_exchange_position(
+                symbol=symbol,
+                quantity=float(asset.get("balance", 0.0)),
+                average_price=float(asset.get("avg_buy_price", 0.0)),
+                cash_balance=float(account_summary.get("krw_cash", 0.0)) if account_summary else None,
+            )
         semi_live_result = self.semi_live_service.run_once(
             strategy_name=strategy_name,
             symbol=symbol,
             timeframe=timeframe,
             limit=limit,
         )
-        account_summary = self.account_service.summarize_upbit_balances() if self.account_service else None
         payload = {
             "mode": "shadow",
             "strategy_name": strategy_name,
