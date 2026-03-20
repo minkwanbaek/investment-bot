@@ -22,8 +22,12 @@ class LiveExecutionService:
         notional = round(normalized["normalized_price"] * volume, 8)
         allowed = notional >= rules["min_order_notional"]
         account_summary = self.account_service.summarize_upbit_balances() if self.account_service else None
+        asset_summary = self.account_service.get_asset_balance(symbol) if self.account_service else None
         krw_cash = account_summary["krw_cash"] if account_summary else None
+        asset_balance = asset_summary["balance"] if asset_summary else None
         if side == "buy" and krw_cash is not None and notional > krw_cash:
+            allowed = False
+        if side == "sell" and asset_balance is not None and volume > asset_balance:
             allowed = False
         payload = {
             "exchange": "upbit",
@@ -39,6 +43,7 @@ class LiveExecutionService:
             "notional": notional,
             "min_order_notional": rules["min_order_notional"],
             "account_summary": account_summary,
+            "asset_summary": asset_summary,
             "would_submit_live": self.live_mode == "live" and self.confirm_live_trading and allowed,
             "allowed": allowed,
             "dry_run_only": self.live_mode != "live" or not self.confirm_live_trading,

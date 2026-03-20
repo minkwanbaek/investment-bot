@@ -10,7 +10,10 @@ class FakeUpbitClient:
         return [{"market": "KRW-BTC", "korean_name": "비트코인", "english_name": "Bitcoin"}]
 
     def get_balances(self):
-        return [{"currency": "KRW", "balance": "1000000", "locked": "0", "avg_buy_price": "0", "unit_currency": "KRW"}]
+        return [
+            {"currency": "KRW", "balance": "1000000", "locked": "0", "avg_buy_price": "0", "unit_currency": "KRW"},
+            {"currency": "BTC", "balance": "0.002", "locked": "0", "avg_buy_price": "100000000", "unit_currency": "KRW"},
+        ]
 
     def create_limit_order(self, market: str, side: str, volume: str, price: str, ord_type: str = "limit"):
         return {"uuid": "test-order", "market": market, "side": side, "volume": volume, "price": price, "ord_type": ord_type}
@@ -53,3 +56,19 @@ def test_live_execution_submits_when_live_mode_and_confirmation_are_enabled(tmp_
     assert submitted["submitted_payload"]["market"] == "KRW-BTC"
     assert submitted["submitted_payload"]["side"] == "bid"
     assert submitted["submitted_payload"]["ord_type"] == "limit"
+
+
+def test_live_execution_blocks_sell_when_balance_is_insufficient(tmp_path):
+    client = FakeUpbitClient()
+    service = LiveExecutionService(
+        upbit_client=client,
+        exchange_rules_service=ExchangeRulesService(upbit_client=client),
+        run_history_service=RunHistoryService(store=RunHistoryStore(str(tmp_path / "run_history.json"))),
+        account_service=AccountService(upbit_client=client),
+        live_mode="live",
+        confirm_live_trading=True,
+    )
+
+    preview = service.preview_order(symbol="BTC/KRW", side="sell", price=102913123, volume=0.01)
+    assert preview["allowed"] is False
+    assert preview["asset_summary"]["balance"] == 0.002

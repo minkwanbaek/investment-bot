@@ -5,12 +5,16 @@ from investment_bot.services.run_history_store import RunHistoryStore
 
 
 class FakeShadowService:
+    def __init__(self, action: str = "buy", latest_price: float = 1000.0):
+        self.action = action
+        self.latest_price = latest_price
+
     def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5):
         return {
             "decision": {
                 "review": {
-                    "action": "buy",
-                    "latest_price": 1000.0,
+                    "action": self.action,
+                    "latest_price": self.latest_price,
                 }
             }
         }
@@ -25,18 +29,22 @@ class FakeLiveExecutionService:
 
 
 class FakeAccountService:
-    def __init__(self, krw_cash: float):
+    def __init__(self, krw_cash: float, asset_balance: float = 0.0):
         self.krw_cash = krw_cash
+        self.asset_balance = asset_balance
 
     def summarize_upbit_balances(self):
         return {"exchange": "upbit", "krw_cash": self.krw_cash, "asset_count": 0, "assets": []}
+
+    def get_asset_balance(self, symbol: str):
+        return {"currency": symbol.split('/')[0], "balance": self.asset_balance, "locked": 0.0, "total_balance": self.asset_balance, "avg_buy_price": 1000.0, "estimated_cost_basis": self.asset_balance * 1000.0}
 
 
 def test_auto_trade_service_skips_when_krw_balance_is_below_threshold(tmp_path):
     history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
     service = AutoTradeService(
         settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=10000),
-        shadow_service=FakeShadowService(),
+        shadow_service=FakeShadowService(action="buy"),
         live_execution_service=FakeLiveExecutionService(),
         account_service=FakeAccountService(krw_cash=5000),
         run_history_service=history,
@@ -48,11 +56,11 @@ def test_auto_trade_service_skips_when_krw_balance_is_below_threshold(tmp_path):
     assert result['reason'] == 'insufficient_krw_balance'
 
 
-def test_auto_trade_service_submits_when_profile_conditions_are_met(tmp_path):
+def test_auto_trade_service_submits_buy_when_profile_conditions_are_met(tmp_path):
     history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
     service = AutoTradeService(
         settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=10000, min_order_notional=5000),
-        shadow_service=FakeShadowService(),
+        shadow_service=FakeShadowService(action="buy"),
         live_execution_service=FakeLiveExecutionService(),
         account_service=FakeAccountService(krw_cash=55000),
         run_history_service=history,
@@ -63,3 +71,38 @@ def test_auto_trade_service_submits_when_profile_conditions_are_met(tmp_path):
     assert result['status'] == 'submitted'
     assert result['submit']['status'] == 'submitted'
     assert result['preview']['allowed'] is True
+    assert result['side'] == 'buy'
+
+
+def test_auto_trade_service_submits_sell_using_exchange_balance(tmp_path):
+    history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
+    service = AutoTradeService(
+        settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=10000, min_order_notional=5000),
+        shadow_service=FakeShadowService(action="sell", latest_price=1000.0),
+        live_execution_service=FakeLiveExecutionService(),
+        account_service=FakeAccountService(krw_cash=0, asset_balance=0.25),
+        run_history_service=history,
+    )
+
+    result = service.run_once()
+
+    assert result['status'] == 'submitted'
+    assert result['side'] == 'sell'
+    assert result['submit']['side'] == 'sell'
+    assert result['submit']['volume'] == 0.25
+
+
+def test_auto_trade_service_skips_sell_when_exchange_balance_is_empty(tmp_path):
+    history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
+    service = AutoTradeService(
+        settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=10000, min_order_notional=5000),
+        shadow_service=FakeShadowService(action="sell", latest_price=1000.0),
+        live_execution_service=FakeLiveExecutionService(),
+        account_service=FakeAccountService(krw_cash=0, asset_balance=0.0),
+        run_history_service=history,
+    )
+
+    result = service.run_once()
+
+    assert result['status'] == 'skipped'
+    assert result['reason'] == 'insufficient_asset_balance'

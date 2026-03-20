@@ -65,14 +65,6 @@ class AutoTradeService:
     def run_once(self) -> dict:
         account = self.account_service.summarize_upbit_balances()
         krw_cash = float(account.get("krw_cash", 0.0))
-        if krw_cash < self.settings.auto_trade_min_krw_balance:
-            result = {
-                "status": "skipped",
-                "reason": "insufficient_krw_balance",
-                "krw_cash": krw_cash,
-                "required_min_krw": self.settings.auto_trade_min_krw_balance,
-            }
-            return self._remember(result, record_kind="auto_trade_skip")
 
         if self._cooldown_active():
             result = {
@@ -90,34 +82,62 @@ class AutoTradeService:
         )
         review = shadow["decision"]["review"]
         action = review.get("action")
-        if action != "buy":
-            result = {
-                "status": "skipped",
-                "reason": "non_buy_signal",
-                "shadow": shadow,
-            }
-            return self._remember(result, record_kind="auto_trade_skip")
 
-        target_notional = min(
-            krw_cash * (self.settings.auto_trade_target_allocation_pct / 100),
-            krw_cash,
-        )
-        target_notional = max(target_notional, self.settings.min_order_notional)
-        if target_notional < self.settings.auto_trade_meaningful_order_notional:
-            result = {
-                "status": "skipped",
-                "reason": "below_meaningful_order_notional",
-                "target_notional": round(target_notional, 4),
-                "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
-                "shadow": shadow,
-            }
-            return self._remember(result, record_kind="auto_trade_skip")
+        if action == "buy":
+            if krw_cash < self.settings.auto_trade_min_krw_balance:
+                result = {
+                    "status": "skipped",
+                    "reason": "insufficient_krw_balance",
+                    "krw_cash": krw_cash,
+                    "required_min_krw": self.settings.auto_trade_min_krw_balance,
+                    "shadow": shadow,
+                }
+                return self._remember(result, record_kind="auto_trade_skip")
 
-        price = review["latest_price"]
-        volume = round(target_notional / price, 8)
+            target_notional = min(
+                krw_cash * (self.settings.auto_trade_target_allocation_pct / 100),
+                krw_cash,
+            )
+            target_notional = max(target_notional, self.settings.min_order_notional)
+            if target_notional < self.settings.auto_trade_meaningful_order_notional:
+                result = {
+                    "status": "skipped",
+                    "reason": "below_meaningful_order_notional",
+                    "target_notional": round(target_notional, 4),
+                    "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
+                    "shadow": shadow,
+                }
+                return self._remember(result, record_kind="auto_trade_skip")
+
+            price = review["latest_price"]
+            volume = round(target_notional / price, 8)
+            return self._submit_trade(action="buy", price=price, volume=volume, shadow=shadow)
+
+        if action == "sell":
+            asset = self.account_service.get_asset_balance(self.settings.auto_trade_symbol)
+            available_volume = float(asset.get("balance", 0.0))
+            if available_volume <= 0:
+                result = {
+                    "status": "skipped",
+                    "reason": "insufficient_asset_balance",
+                    "asset": asset,
+                    "shadow": shadow,
+                }
+                return self._remember(result, record_kind="auto_trade_skip")
+            price = review["latest_price"]
+            return self._submit_trade(action="sell", price=price, volume=available_volume, shadow=shadow)
+
+        result = {
+            "status": "skipped",
+            "reason": "non_actionable_signal",
+            "shadow": shadow,
+        }
+        return self._remember(result, record_kind="auto_trade_skip")
+
+    def _submit_trade(self, action: str, price: float, volume: float, shadow: dict) -> dict:
         preview = self.live_execution_service.preview_order(
             symbol=self.settings.auto_trade_symbol,
-            side="buy",
+            side=action,
             price=price,
             volume=volume,
         )
@@ -132,13 +152,14 @@ class AutoTradeService:
 
         submit = self.live_execution_service.submit_order(
             symbol=self.settings.auto_trade_symbol,
-            side="buy",
+            side=action,
             price=price,
             volume=volume,
         )
         self._last_submitted_at = datetime.now(timezone.utc)
         result = {
             "status": "submitted",
+            "side": action,
             "shadow": shadow,
             "preview": preview,
             "submit": submit,
