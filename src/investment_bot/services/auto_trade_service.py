@@ -94,11 +94,14 @@ class AutoTradeService:
                 }
                 return self._remember(result, record_kind="auto_trade_skip")
 
-            target_notional = min(
+            allocation_cap = min(
                 krw_cash * (self.settings.auto_trade_target_allocation_pct / 100),
                 krw_cash,
             )
+            reviewed_target = float(review.get("target_notional", 0.0) or 0.0)
+            target_notional = min(allocation_cap, reviewed_target if reviewed_target > 0 else allocation_cap)
             target_notional = max(target_notional, self.settings.min_order_notional)
+            target_notional = min(target_notional, krw_cash)
             if target_notional < self.settings.auto_trade_meaningful_order_notional:
                 result = {
                     "status": "skipped",
@@ -125,7 +128,18 @@ class AutoTradeService:
                 }
                 return self._remember(result, record_kind="auto_trade_skip")
             price = review["latest_price"]
-            return self._submit_trade(action="sell", price=price, volume=available_volume, shadow=shadow)
+            confidence = float(review.get("confidence", 0.0) or 0.0)
+            sell_ratio = min(max(confidence, 0.25), 1.0)
+            volume = round(available_volume * sell_ratio, 8)
+            if volume <= 0:
+                result = {
+                    "status": "skipped",
+                    "reason": "sell_volume_zero_after_sizing",
+                    "asset": asset,
+                    "shadow": shadow,
+                }
+                return self._remember(result, record_kind="auto_trade_skip")
+            return self._submit_trade(action="sell", price=price, volume=volume, shadow=shadow)
 
         result = {
             "status": "skipped",

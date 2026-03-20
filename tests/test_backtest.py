@@ -24,7 +24,7 @@ def test_replay_backtest_runs_multiple_steps_and_returns_summary():
 
     candles = [
         Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=close, volume=1, timestamp=str(i))
-        for i, close in enumerate([100, 101, 102, 103, 104, 105, 106], start=1)
+        for i, close in enumerate([100, 101, 102, 103, 104, 105, 106, 108, 110], start=1)
     ]
     market_data_service.load_replay(symbol="BTC/KRW", timeframe="1h", candles=candles)
 
@@ -32,14 +32,14 @@ def test_replay_backtest_runs_multiple_steps_and_returns_summary():
         strategy_name="trend_following",
         symbol="BTC/KRW",
         timeframe="1h",
-        window=5,
+        window=8,
         steps=2,
     )
 
     assert result["steps"] == 2
     assert len(result["runs"]) == 2
-    assert result["runs"][0]["timestamp"] == "5"
-    assert result["runs"][1]["timestamp"] == "6"
+    assert result["runs"][0]["timestamp"] == "8"
+    assert result["runs"][1]["timestamp"] == "9"
     assert result["metrics"]["total_steps"] == 2
     assert result["metrics"]["equity_curve"][0] == 1000
     assert "win_rate_pct" in result["metrics"]

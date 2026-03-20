@@ -5,9 +5,11 @@ from investment_bot.services.run_history_store import RunHistoryStore
 
 
 class FakeShadowService:
-    def __init__(self, action: str = "buy", latest_price: float = 1000.0):
+    def __init__(self, action: str = "buy", latest_price: float = 1000.0, confidence: float = 0.5, target_notional: float = 6000.0):
         self.action = action
         self.latest_price = latest_price
+        self.confidence = confidence
+        self.target_notional = target_notional
 
     def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5):
         return {
@@ -15,6 +17,8 @@ class FakeShadowService:
                 "review": {
                     "action": self.action,
                     "latest_price": self.latest_price,
+                    "confidence": self.confidence,
+                    "target_notional": self.target_notional,
                 }
             }
         }
@@ -59,8 +63,8 @@ def test_auto_trade_service_skips_when_krw_balance_is_below_threshold(tmp_path):
 def test_auto_trade_service_submits_buy_when_profile_conditions_are_met(tmp_path):
     history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
     service = AutoTradeService(
-        settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=10000, min_order_notional=5000),
-        shadow_service=FakeShadowService(action="buy"),
+        settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=5000, min_order_notional=5000),
+        shadow_service=FakeShadowService(action="buy", target_notional=6000.0),
         live_execution_service=FakeLiveExecutionService(),
         account_service=FakeAccountService(krw_cash=55000),
         run_history_service=history,
@@ -72,13 +76,30 @@ def test_auto_trade_service_submits_buy_when_profile_conditions_are_met(tmp_path
     assert result['submit']['status'] == 'submitted'
     assert result['preview']['allowed'] is True
     assert result['side'] == 'buy'
+    assert result['submit']['volume'] == 6.0
+
+
+def test_auto_trade_service_caps_buy_by_review_target_notional(tmp_path):
+    history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
+    service = AutoTradeService(
+        settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=5000, min_order_notional=5000),
+        shadow_service=FakeShadowService(action="buy", target_notional=5200.0),
+        live_execution_service=FakeLiveExecutionService(),
+        account_service=FakeAccountService(krw_cash=100000),
+        run_history_service=history,
+    )
+
+    result = service.run_once()
+
+    assert result['status'] == 'submitted'
+    assert result['submit']['volume'] == 5.2
 
 
 def test_auto_trade_service_submits_sell_using_exchange_balance(tmp_path):
     history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
     service = AutoTradeService(
         settings=Settings(auto_trade_min_krw_balance=15000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=10000, min_order_notional=5000),
-        shadow_service=FakeShadowService(action="sell", latest_price=1000.0),
+        shadow_service=FakeShadowService(action="sell", latest_price=1000.0, confidence=0.8),
         live_execution_service=FakeLiveExecutionService(),
         account_service=FakeAccountService(krw_cash=0, asset_balance=0.25),
         run_history_service=history,
@@ -89,7 +110,7 @@ def test_auto_trade_service_submits_sell_using_exchange_balance(tmp_path):
     assert result['status'] == 'submitted'
     assert result['side'] == 'sell'
     assert result['submit']['side'] == 'sell'
-    assert result['submit']['volume'] == 0.25
+    assert result['submit']['volume'] == 0.2
 
 
 def test_auto_trade_service_skips_sell_when_exchange_balance_is_empty(tmp_path):
