@@ -1,9 +1,12 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import logging
 import threading
 import time
 
 from investment_bot.core.settings import Settings
+
+logger = logging.getLogger(__name__)
 from investment_bot.services.account_service import AccountService
 from investment_bot.services.live_execution_service import LiveExecutionService
 from investment_bot.services.run_history_service import RunHistoryService
@@ -77,8 +80,10 @@ class AutoTradeService:
     def run_once(self) -> dict:
         account = self.account_service.summarize_upbit_balances()
         krw_cash = float(account.get("krw_cash", 0.0))
+        logger.info("run_once started | krw_cash=%.2f symbols=%s", krw_cash, self.settings.symbols)
 
         if self._cooldown_active():
+            logger.info("run_once skipped: cooldown_active")
             result = {"status": "skipped", "reason": "cooldown_active", "cooldown_cycles": self.settings.auto_trade_cooldown_cycles}
             return self._remember(result, record_kind="auto_trade_skip")
 
@@ -90,13 +95,16 @@ class AutoTradeService:
         sell_candidates = [c for c in candidates if c["action"] == "sell"]
         if sell_candidates:
             chosen = max(sell_candidates, key=lambda c: (1 if c["override"] else 0, c["score"]))
+            logger.info("sell candidate chosen | symbol=%s score=%.4f override=%s", chosen["symbol"], chosen["score"], chosen.get("override"))
             return self._handle_sell(chosen)
 
         buy_candidates = [c for c in candidates if c["action"] == "buy"]
         if buy_candidates:
             chosen = max(buy_candidates, key=lambda c: c["score"])
+            logger.info("buy candidate chosen | symbol=%s score=%.4f confidence=%.4f", chosen["symbol"], chosen["score"], chosen["confidence"])
             return self._handle_buy(chosen, krw_cash=krw_cash, account=account)
 
+        logger.info("run_once skipped: non_actionable_signal | %d candidates evaluated", len(candidates))
         result = {"status": "skipped", "reason": "non_actionable_signal", "candidates": candidates}
         return self._remember(result, record_kind="auto_trade_skip")
 
@@ -200,10 +208,12 @@ class AutoTradeService:
     def _submit_trade(self, symbol: str, action: str, price: float, volume: float, shadow: dict, override: dict | None = None, extra: dict | None = None) -> dict:
         preview = self.live_execution_service.preview_order(symbol=symbol, side=action, price=price, volume=volume)
         if not preview.get("allowed"):
+            logger.warning("trade preview blocked | symbol=%s side=%s price=%.2f volume=%.8f", symbol, action, price, volume)
             result = {"status": "skipped", "reason": "preview_blocked", "preview": preview, "shadow": shadow, "override": override, **(extra or {})}
             return self._remember(result, record_kind="auto_trade_skip")
         submit = self.live_execution_service.submit_order(symbol=symbol, side=action, price=price, volume=volume)
         self._last_submitted_at = datetime.now(timezone.utc)
+        logger.info("trade submitted | symbol=%s side=%s price=%.2f volume=%.8f", symbol, action, price, volume)
         result = {"status": "submitted", "symbol": symbol, "side": action, "shadow": shadow, "preview": preview, "submit": submit, "override": override, **(extra or {})}
         return self._remember(result, record_kind="auto_trade_submit")
 
@@ -218,6 +228,7 @@ class AutoTradeService:
             try:
                 self.run_once()
             except Exception as exc:
+                logger.exception("auto_trade_loop error: %s", exc)
                 self._remember({"status": "error", "reason": str(exc)}, record_kind="auto_trade_error")
             slept = 0
             while self.active and slept < self.settings.auto_trade_interval_seconds:
