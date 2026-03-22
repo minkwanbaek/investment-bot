@@ -16,6 +16,8 @@ class StrategySelectionService:
         if symbol == "BTC/KRW":
             if regime in {"uptrend", "downtrend"}:
                 return ["trend_following"]
+            if regime in {"ranging", "mixed"}:
+                return ["dca"]
             return []
         if symbol == "ETH/KRW":
             if regime == "uptrend":

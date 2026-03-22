@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-03-22T02:15:00Z",
+  "pytest_ok": true,
+  "pytest_rc": 0,
+  "change": "strategy_selection_service: allow dca for BTC/KRW in ranging/mixed regimes",
+  "file_changed": "src/investment_bot/services/strategy_selection_service.py",
+  "test_added": "tests/test_strategy_selection_service.py",
+  "tests_passed": 28,
+  "run_once_status": "skipped",
+  "run_once_reason": "non_actionable_signal",
+  "health": "ok",
+  "recommendations": []
+}

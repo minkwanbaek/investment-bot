@@ -1,0 +1,2 @@
+{"timestamp": "2026-03-20T19:52:06Z", "pytest_ok": true, "pytest_rc": 0, "recommendations": ["dust or minimum-order review needed"], "stdout_tail": "..................                                                       [100%]\n18 passed in 0.38s\n", "stderr_tail": ""}
+{"timestamp":"2026-03-22T02:15:00Z","pytest_ok":true,"change":"allow dca for BTC/KRW in ranging/mixed regimes","tests_passed":28,"health":"ok"}
