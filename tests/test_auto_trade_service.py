@@ -110,6 +110,8 @@ def test_auto_trade_service_enforces_total_exposure_limit_before_buy(tmp_path):
     result = service.run_once()
     assert result['status'] == 'skipped'
     assert result['reason'] == 'below_meaningful_order_notional_or_total_exposure_limit'
+    assert result['blocker'] == 'total_exposure_limit'
+    assert result['remaining_exposure_room'] == 0.0
 
 
 def test_auto_trade_service_prefers_sell_over_buy_across_symbols(tmp_path):

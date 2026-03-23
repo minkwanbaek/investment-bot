@@ -166,7 +166,16 @@ class AutoTradeService:
         target_notional = max(target_notional, self.settings.min_order_notional) if remaining_exposure_room >= self.settings.min_order_notional else target_notional
         target_notional = min(target_notional, krw_cash)
         if target_notional < self.settings.auto_trade_meaningful_order_notional:
-            result = {"status": "skipped", "reason": "below_meaningful_order_notional_or_total_exposure_limit", "target_notional": round(target_notional, 4), "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional, "current_exposure": round(current_exposure, 4), "max_total_exposure_value": round(max_total_exposure_value, 4), "chosen": chosen}
+            blocker = "total_exposure_limit" if remaining_exposure_room < self.settings.auto_trade_meaningful_order_notional else "meaningful_order_notional"
+            logger.info(
+                "run_once skipped: below_meaningful_order_notional_or_total_exposure_limit | blocker=%s target_notional=%.4f remaining_exposure_room=%.4f current_exposure=%.4f max_total_exposure_value=%.4f",
+                blocker,
+                target_notional,
+                remaining_exposure_room,
+                current_exposure,
+                max_total_exposure_value,
+            )
+            result = {"status": "skipped", "reason": "below_meaningful_order_notional_or_total_exposure_limit", "blocker": blocker, "target_notional": round(target_notional, 4), "remaining_exposure_room": round(remaining_exposure_room, 4), "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional, "current_exposure": round(current_exposure, 4), "max_total_exposure_value": round(max_total_exposure_value, 4), "chosen": chosen}
             return self._remember(result, record_kind="auto_trade_skip")
         price = chosen["latest_price"]
         volume = round(target_notional / price, 8)
