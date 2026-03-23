@@ -19,13 +19,18 @@ config = fetch('http://localhost:8899/config')
 run_history = json.loads(RUN_HISTORY.read_text()) if RUN_HISTORY.exists() else []
 recent = run_history[-80:]
 skip_reasons = Counter()
+skip_blockers = Counter()
 kind_counts = Counter()
 for row in recent:
     kind = row.get('kind', 'unknown')
     kind_counts[kind] += 1
     payload = row.get('payload', {}) or {}
     if kind == 'auto_trade_skip':
-        skip_reasons[payload.get('reason', 'unknown')] += 1
+        reason = payload.get('reason', 'unknown')
+        skip_reasons[reason] += 1
+        blocker = payload.get('blocker')
+        if blocker:
+            skip_blockers[f'{reason}:{blocker}'] += 1
 
 snapshot = {
     'timestamp': TS,
@@ -43,6 +48,7 @@ snapshot = {
     },
     'recent_kind_counts': dict(kind_counts),
     'recent_skip_reasons': dict(skip_reasons),
+    'recent_skip_blockers': dict(skip_blockers),
 }
 (OUT / 'latest_monitor.json').write_text(json.dumps(snapshot, ensure_ascii=False, indent=2))
 with (OUT / 'monitor_history.jsonl').open('a', encoding='utf-8') as f:
