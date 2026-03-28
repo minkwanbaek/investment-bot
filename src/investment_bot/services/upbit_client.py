@@ -24,6 +24,17 @@ class UpbitClient:
     def get_markets(self, is_details: bool = False) -> list[dict]:
         return self._request("GET", "/v1/market/all", params={"isDetails": str(is_details).lower()}, auth=False)
 
+    def get_ticker(self, markets: list[str]) -> list[dict]:
+        payload = []
+        for market in markets:
+            try:
+                rows = self._request("GET", "/v1/ticker", params={"markets": market}, auth=False)
+                if isinstance(rows, list):
+                    payload.extend(rows)
+            except Exception:
+                continue
+        return payload
+
     def create_limit_order(self, market: str, side: str, volume: str, price: str, ord_type: str = "limit") -> dict:
         return self._request(
             "POST",

@@ -161,7 +161,7 @@ class AutoTradeService:
         if krw_cash < self.settings.auto_trade_min_krw_balance:
             result = {"status": "skipped", "reason": "insufficient_krw_balance", "krw_cash": krw_cash, "required_min_krw": self.settings.auto_trade_min_krw_balance, "chosen": chosen}
             return self._remember(result, record_kind="auto_trade_skip")
-        current_exposure = sum(float(asset.get("estimated_cost_basis", 0.0) or 0.0) for asset in account.get("assets", []))
+        current_exposure = sum(float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0) for asset in account.get("assets", []))
         total_equity = krw_cash + current_exposure
         allocation_cap = min(krw_cash * (self.settings.auto_trade_target_allocation_pct / 100), krw_cash)
         review = chosen["review"]
