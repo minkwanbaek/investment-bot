@@ -8,6 +8,7 @@ from investment_bot.core.settings import Settings
 
 logger = logging.getLogger(__name__)
 from investment_bot.services.account_service import AccountService
+from investment_bot.services.dynamic_symbol_selector import DynamicSymbolSelector
 from investment_bot.services.live_execution_service import LiveExecutionService
 from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.shadow_service import ShadowService
@@ -23,6 +24,7 @@ class AutoTradeService:
     account_service: AccountService
     run_history_service: RunHistoryService
     strategy_selection_service: StrategySelectionService
+    dynamic_symbol_selector: DynamicSymbolSelector | None = None
     active: bool = False
     _thread: threading.Thread | None = field(default=None, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
@@ -35,6 +37,8 @@ class AutoTradeService:
             "enabled": self.settings.auto_trade_enabled,
             "symbol": self.settings.auto_trade_symbol,
             "symbols": self.settings.symbols,
+            "dynamic_symbol_selection": self.settings.dynamic_symbol_selection,
+            "dynamic_symbol_top_n": self.settings.dynamic_symbol_top_n,
             "enabled_strategies": list_enabled_strategies(),
             "strategy_name": self.settings.auto_trade_strategy_name,
             "timeframe": self.settings.auto_trade_timeframe,
@@ -88,7 +92,10 @@ class AutoTradeService:
             return self._remember(result, record_kind="auto_trade_skip")
 
         candidates = []
-        for symbol in self.settings.symbols:
+        symbols = self.settings.symbols
+        if self.settings.dynamic_symbol_selection and self.dynamic_symbol_selector:
+            symbols = self.dynamic_symbol_selector.select(symbols=self.settings.symbols, timeframe=self.settings.auto_trade_timeframe, top_n=self.settings.dynamic_symbol_top_n)
+        for symbol in symbols:
             per_symbol = self._collect_symbol_candidates(symbol)
             candidates.extend(per_symbol)
 

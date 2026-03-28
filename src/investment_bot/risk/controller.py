@@ -2,16 +2,20 @@ from investment_bot.models.signal import TradeSignal
 
 
 class RiskController:
-    def __init__(self, max_confidence_position_scale: float = 1.0, min_order_notional: float = 0.0):
+    def __init__(self, max_confidence_position_scale: float = 1.0, min_order_notional: float = 0.0, base_entry_notional: float = 10000.0):
         self.max_confidence_position_scale = max_confidence_position_scale
         self.min_order_notional = min_order_notional
+        self.base_entry_notional = base_entry_notional
 
     def review(self, signal: TradeSignal, cash_balance: float = 0.0, latest_price: float = 1.0) -> dict:
         approved = signal.action != "hold"
         position_value_budget = cash_balance * signal.confidence * self.max_confidence_position_scale
 
-        if approved and signal.action == "buy" and cash_balance >= self.min_order_notional:
-            position_value_budget = max(position_value_budget, self.min_order_notional)
+        if approved and signal.action == "buy":
+            if cash_balance >= self.base_entry_notional:
+                position_value_budget = max(position_value_budget, self.base_entry_notional)
+            elif cash_balance >= self.min_order_notional:
+                position_value_budget = max(position_value_budget, self.min_order_notional)
 
         if approved and signal.action == "buy":
             position_value_budget = min(position_value_budget, cash_balance)

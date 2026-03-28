@@ -8,10 +8,12 @@ trading:
     - BTC/KRW
     - ETH/KRW
     - SOL/KRW
+  dynamic_symbol_selection: true
+  dynamic_symbol_top_n: 10
   starting_cash: 10000000
   min_order_notional: 5000
 risk:
-  max_risk_per_trade_pct: 1.0
+  max_risk_per_trade_pct: 20.0
   max_daily_loss_pct: 3.0
   max_drawdown_pct: 10.0
 auto_trade:
@@ -22,6 +24,7 @@ auto_trade:
   limit: 8
   interval_seconds: 300
   min_krw_balance: 15000
+  base_entry_notional: 10000
   target_allocation_pct: 20.0
   meaningful_order_notional: 10000
   max_pending_seconds: 600

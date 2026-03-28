@@ -10,6 +10,7 @@ from investment_bot.services.backtest_service import BacktestService
 from investment_bot.services.candle_store import CandleStore
 from investment_bot.services.config_service import ConfigService
 from investment_bot.services.drift_report_service import DriftReportService
+from investment_bot.services.dynamic_symbol_selector import DynamicSymbolSelector
 from investment_bot.services.exchange_rules_service import ExchangeRulesService
 from investment_bot.services.fail_safe_service import FailSafeService
 from investment_bot.services.ledger_store import LedgerStore
@@ -22,6 +23,7 @@ from investment_bot.services.run_history_store import RunHistoryStore
 from investment_bot.services.scheduler_service import SchedulerService
 from investment_bot.services.semi_live_service import SemiLiveService
 from investment_bot.services.shadow_service import ShadowService
+from investment_bot.services.strategy_selection_service import StrategySelectionService
 from investment_bot.services.trading_cycle import TradingCycleService
 from investment_bot.services.upbit_client import UpbitClient
 from investment_bot.services.visualization_service import VisualizationService
@@ -56,6 +58,7 @@ def get_risk_controller() -> RiskController:
     return RiskController(
         max_confidence_position_scale=settings.max_risk_per_trade_pct / 100,
         min_order_notional=max(settings.min_order_notional, 5000.0 if settings.base_currency == "KRW" else 0.0),
+        base_entry_notional=settings.auto_trade_base_entry_notional,
     )
 
 
@@ -106,6 +109,11 @@ def get_upbit_client() -> UpbitClient:
 @lru_cache
 def get_account_service() -> AccountService:
     return AccountService(upbit_client=get_upbit_client())
+
+
+@lru_cache
+def get_dynamic_symbol_selector() -> DynamicSymbolSelector:
+    return DynamicSymbolSelector(market_data_service=get_market_data_service())
 
 
 @lru_cache
@@ -190,6 +198,5 @@ def get_auto_trade_service() -> AutoTradeService:
         account_service=get_account_service(),
         run_history_service=get_run_history_service(),
         strategy_selection_service=StrategySelectionService(),
-    )
-history_service(),
+        dynamic_symbol_selector=get_dynamic_symbol_selector(),
     )

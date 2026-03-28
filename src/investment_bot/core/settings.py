@@ -16,6 +16,8 @@ class TradingConfig(BaseModel):
     mode: str = "paper"
     base_currency: str = "KRW"
     symbols: list[str] = Field(default_factory=lambda: ["BTC/KRW"])
+    dynamic_symbol_selection: bool = False
+    dynamic_symbol_top_n: int = 10
     starting_cash: float = 10_000_000
     min_order_notional: float = 0.0
     max_consecutive_buys: int = 3
@@ -40,6 +42,7 @@ class AutoTradeConfig(BaseModel):
     limit: int = 5
     interval_seconds: int = 300
     min_krw_balance: float = 15000.0
+    base_entry_notional: float = 10000.0
     target_allocation_pct: float = 20.0
     meaningful_order_notional: float = 10000.0
     max_pending_seconds: int = 600
@@ -67,6 +70,8 @@ class Settings(BaseSettings):
     trading_mode: str = "paper"
     base_currency: str = "KRW"
     symbols: list[str] = Field(default_factory=lambda: ["BTC/KRW"])
+    dynamic_symbol_selection: bool = False
+    dynamic_symbol_top_n: int = 10
     starting_cash: float = 10_000_000
     min_order_notional: float = 0.0
     max_consecutive_buys: int = 3
@@ -90,6 +95,7 @@ class Settings(BaseSettings):
     auto_trade_limit: int = 5
     auto_trade_interval_seconds: int = 300
     auto_trade_min_krw_balance: float = 15000.0
+    auto_trade_base_entry_notional: float = 10000.0
     auto_trade_target_allocation_pct: float = 20.0
     auto_trade_meaningful_order_notional: float = 10000.0
     auto_trade_max_pending_seconds: int = 600
@@ -131,6 +137,8 @@ def get_settings() -> Settings:
         trading_mode=file_config.trading.mode,
         base_currency=file_config.trading.base_currency,
         symbols=file_config.trading.symbols,
+        dynamic_symbol_selection=file_config.trading.dynamic_symbol_selection,
+        dynamic_symbol_top_n=file_config.trading.dynamic_symbol_top_n,
         starting_cash=file_config.trading.starting_cash,
         min_order_notional=file_config.trading.min_order_notional,
         max_consecutive_buys=file_config.trading.max_consecutive_buys,
@@ -154,6 +162,7 @@ def get_settings() -> Settings:
         auto_trade_limit=file_config.auto_trade.limit,
         auto_trade_interval_seconds=file_config.auto_trade.interval_seconds,
         auto_trade_min_krw_balance=file_config.auto_trade.min_krw_balance,
+        auto_trade_base_entry_notional=file_config.auto_trade.base_entry_notional,
         auto_trade_target_allocation_pct=file_config.auto_trade.target_allocation_pct,
         auto_trade_meaningful_order_notional=file_config.auto_trade.meaningful_order_notional,
         auto_trade_max_pending_seconds=file_config.auto_trade.max_pending_seconds,
