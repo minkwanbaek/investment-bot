@@ -30,6 +30,7 @@ class AutoTradeService:
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _last_submitted_at: datetime | None = field(default=None, init=False)
     _last_result: dict | None = field(default=None, init=False)
+    _last_selected_symbols: list[str] = field(default_factory=list, init=False)
     _peak_price_by_symbol: dict[str, float] = field(default_factory=dict, init=False)
 
     def profile(self) -> dict:
@@ -39,6 +40,7 @@ class AutoTradeService:
             "symbols": self.settings.symbols,
             "dynamic_symbol_selection": self.settings.dynamic_symbol_selection,
             "dynamic_symbol_top_n": self.settings.dynamic_symbol_top_n,
+            "last_selected_symbols": self._last_selected_symbols,
             "enabled_strategies": list_enabled_strategies(),
             "strategy_name": self.settings.auto_trade_strategy_name,
             "timeframe": self.settings.auto_trade_timeframe,
@@ -58,9 +60,11 @@ class AutoTradeService:
         }
 
     def status(self) -> dict:
+        profile = self.profile()
+        profile["last_selected_symbols"] = self._last_selected_symbols
         return {
             "active": self.active,
-            "profile": self.profile(),
+            "profile": profile,
             "last_submitted_at": self._last_submitted_at.isoformat() if self._last_submitted_at else None,
             "last_result": self._last_result,
         }
@@ -95,6 +99,7 @@ class AutoTradeService:
         symbols = self.settings.symbols
         if self.settings.dynamic_symbol_selection and self.dynamic_symbol_selector:
             symbols = self.dynamic_symbol_selector.select(symbols=self.settings.symbols, timeframe=self.settings.auto_trade_timeframe, top_n=self.settings.dynamic_symbol_top_n)
+        self._last_selected_symbols = list(symbols)
         for symbol in symbols:
             per_symbol = self._collect_symbol_candidates(symbol)
             candidates.extend(per_symbol)
@@ -191,7 +196,20 @@ class AutoTradeService:
     def _handle_sell(self, chosen: dict) -> dict:
         asset = chosen["asset"]
         if asset.get("managed") is False:
-            result = {"status": "skipped", "reason": "below_min_managed_position_notional", "chosen": chosen}
+            managed_notional = float(asset.get("managed_notional", asset.get("estimated_cost_basis", 0.0)) or 0.0)
+            logger.info(
+                "run_once skipped: below_min_managed_position_notional | symbol=%s managed_notional=%.4f min_required=%.4f",
+                chosen["symbol"],
+                managed_notional,
+                self.settings.auto_trade_min_managed_position_notional,
+            )
+            result = {
+                "status": "skipped",
+                "reason": "below_min_managed_position_notional",
+                "managed_notional": round(managed_notional, 4),
+                "min_managed_position_notional": self.settings.auto_trade_min_managed_position_notional,
+                "chosen": chosen,
+            }
             return self._remember(result, record_kind="auto_trade_skip")
         available_volume = float(asset.get("balance", 0.0))
         if available_volume <= 0:

@@ -155,6 +155,25 @@ def test_auto_trade_service_skips_dust_positions_below_min_managed_notional(tmp_
     assert result['reason'] == 'non_actionable_signal'
 
 
+def test_auto_trade_service_reports_managed_notional_when_sell_is_blocked_by_threshold(tmp_path):
+    shadow = FakeShadowService({
+        ("SEI/KRW", "trend_following"): {"action": "sell", "latest_price": 78.8, "confidence": 0.99, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("SEI/KRW", "mean_reversion"): {"action": "hold", "latest_price": 78.8, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("SEI/KRW", "dca"): {"action": "hold", "latest_price": 78.8, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+    })
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["SEI/KRW"], auto_trade_min_managed_position_notional=10000.0),
+        shadow,
+        FakeAccountService(krw_cash=0, asset_balances={"SEI/KRW": 121.65450122}, avg_buy_prices={"SEI/KRW": 82.1}),
+    )
+    result = service.run_once()
+    assert result['status'] == 'skipped'
+    assert result['reason'] == 'below_min_managed_position_notional'
+    assert result['managed_notional'] == 9987.8346
+    assert result['min_managed_position_notional'] == 10000.0
+
+
 def test_auto_trade_service_stop_loss_uses_price_pct_not_quantity(tmp_path):
     shadow = FakeShadowService({
         ("BTC/KRW", "trend_following"): {"action": "hold", "latest_price": 98000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
