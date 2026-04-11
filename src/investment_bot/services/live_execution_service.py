@@ -59,6 +59,12 @@ class LiveExecutionService:
             return {**preview, "status": "blocked", "reason": "live_trading_not_confirmed"}
         if not preview["allowed"]:
             return {**preview, "status": "blocked", "reason": "order_below_exchange_rules_or_balance"}
+        
+        # 매도 시에도 최소 주문 금액 체크 (포지션 금액 기준)
+        if side == "sell":
+            position_value = preview["notional"]
+            if position_value < preview["min_order_notional"]:
+                return {**preview, "status": "blocked", "reason": "position_value_below_min_order_notional"}
 
         order_payload = {
             "market": preview["market"],

@@ -9,7 +9,10 @@ from investment_bot.models.market import Candle
 from investment_bot.services.container import get_account_service, get_alert_service, get_auto_trade_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client, get_visualization_service, get_drift_report_service
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
+from .dashboard import router as dashboard_router
+
 router = APIRouter()
+router.include_router(dashboard_router)
 
 
 class DryRunCycleRequest(BaseModel):
