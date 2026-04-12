@@ -1243,6 +1243,129 @@ trend_gap: 0.04~0.07%, momentum: 0.07~0.21%
 
 ---
 
+## 17. route_filter 100% 차단 원인 분해 (2026-04-12 15:xx UTC)
+
+### 확인된 사실
+
+#### 1) 직접 차단 rule
+- **near-miss / BUY 후보 100% 차단의 직접 rule 은 `trend_strategy_route_blocked`**
+- 코드 위치:
+  - `src/investment_bot/services/trading_cycle.py:109-110`
+  - 조건: `strategy_name == "trend_following" and regime not in set(settings.trend_strategy_allowed_regimes)`
+- 현재 설정:
+  - `config/app.yml`
+  - `strategy_route.trend_strategy_allowed_regimes = ["uptrend", "downtrend"]`
+- classifier 출력:
+  - `src/investment_bot/services/market_regime_classifier.py`
+  - `range_pct < 0.01` **또는** `abs(trend_gap_pct) < 0.0015` 이면 `regime = "sideways"`
+- 따라서 **sideways 로 분류된 순간 trend_following 은 구조적으로 route 단계에서 차단**된다.
+
+#### 2) sideway_filter 와의 관계
+- `sideway_filter` 는 별도 2차 차단 장치다.
+- 코드 위치:
+  - `src/investment_bot/services/trading_cycle.py:114-129`
+- 하지만 **현재 운영 설정에서는 `sideway_filter.enabled: false`** 이므로,
+  - 이번 near-miss 100% 차단의 주원인은 `sideway_filter_blocked` 가 아니라
+  - **`trend_strategy_route_blocked` 가 우선 원인**이다.
+- run_history 에 과거 `sideway_filter_blocked` 표본은 남아 있으나, 현 설정 기준 최근 near-miss 설명력은 `trend_strategy_route_blocked` 가 더 높다.
+
+#### 3) 실제 최근 샘플 분해
+- 2026-04-12 run_history 분석 기준
+  - `trend_following + sideways + hold + trend_strategy_route_blocked`: **1115건**
+  - `trend_following + sideways + hold + sideway_filter_blocked`: **1504건** (과거/중복 표본 포함)
+  - near-miss stage 분포: **route_filter 100%**
+  - near-miss block_reason 분포:
+    - `trend_strategy_route_blocked`: **61건**
+    - `momentum_not_positive,trend_strategy_route_blocked`: **24건**
+    - `uncertain_regime_blocked`: **1건**
+- 추가 집계:
+  - `trend_following` 이면서 `market_regime=sideways` 인 기록: **3722건**
+  - 그중 BUY: **0건**
+  - near-miss: **85건**
+- 즉, **sideways + trend_following 조합에서는 BUY 가 사실상 0% 통과**한다.
+
+### 해석
+
+#### 이것이 설계 의도인가?
+- **예, 현재 코드/설정 기준으로는 의도된 정책이다.**
+- classifier 가 sideways 를 보수적으로 판정하고,
+- route policy 가 trend 전략 허용 레짐을 `uptrend/downtrend` 로만 제한하므로,
+- sideways 에서 trend_following 을 막는 것은 우발 버그가 아니라 **명시 정책**이다.
+
+#### 과도한 병목인가?
+- **부분적으로는 그렇다.**
+- 이유:
+  1. near-miss 가 전부 `route_filter` 단계에서 끊긴다.
+  2. 일부 샘플은 `momentum_pct > 0` 인데도 sideways 라는 이유만으로 즉시 hold 전환된다.
+  3. classifier 의 sideways 조건이 `range_pct < 1% OR abs(trend_gap_pct) < 0.15%` 로 넓어서,
+     - 초기 추세 형성 구간까지 sideways 로 묶을 가능성이 있다.
+- 다만,
+  - threshold 근처 표본 자체는 아주 많지 않고,
+  - `momentum_not_positive` 도 함께 있는 표본이 존재하므로,
+  - **즉시 전면 완화보다는 “제한적 예외 허용 + 로깅 강화”가 더 적절**하다.
+
+### 개선안 비교
+
+#### 안 1) 정책 유지 + 로그 강화
+- 내용:
+  - route policy 는 유지
+  - 다만 `trend_strategy_route_blocked` 발생 시 다음 필드를 반드시 구조화 기록
+    - `regime`, `trend_gap_pct`, `range_pct`, `momentum_pct`, `volatility_state`, `higher_tf_bias`
+    - `would_pass_without_route_filter`
+    - `route_block_candidate_grade` 같은 평가 필드
+- 장점:
+  - 실거래 리스크 증가 없음
+  - false negative 규모를 더 정확히 측정 가능
+- 리스크:
+  - 당장 BUY 가 늘지는 않음
+  - 병목이 명확한 상태라 운영 체감 개선이 작음
+
+#### 안 2) sideways 에서 제한적 예외 허용
+- 내용:
+  - `trend_following` 을 sideways 에서 기본 금지하되,
+  - 아래 같은 예외 조건을 만족하면 통과 허용
+    - `momentum_pct > 0`
+    - `trend_gap_pct` 가 threshold 근처 이상
+    - `volatility_state != low`
+    - `higher_tf_bias != bearish`
+  - 예: `sideways_breakout_exception_enabled`
+- 장점:
+  - 현재 구조를 크게 흔들지 않고 false negative 를 줄일 수 있음
+  - early breakout 포착 가능성 증가
+- 리스크:
+  - 횡보장 fake breakout 진입 증가 가능
+  - 예외 조건 설계가 느슨하면 손실/회전율 증가 가능
+
+#### 안 3) route 정책 완화/재설계
+- 내용:
+  - classifier / route 를 더 연속적인 점수 기반으로 바꾸거나,
+  - `sideways` 를 절대 차단이 아닌 penalty 로 전환
+  - 예: regime score 와 strategy suitability score 조합
+- 장점:
+  - 현재의 hard gate 병목을 구조적으로 해소 가능
+  - near-miss → 실제 candidate 전환 구조를 더 자연스럽게 설계 가능
+- 리스크:
+  - 변경 범위가 큼
+  - 회귀 테스트/백테스트 없이 적용 시 정책 안정성 저하 가능
+  - 이번 단계(분석 중심) 범위를 넘어섬
+
+### 추천 판단
+- **1순위 추천 액션: 안 2 (sideways 제한적 예외 허용) 설계 + 안 1 로깅 강화 동반**
+- 이유:
+  - 현 상태는 버그가 아니라 의도된 hard gate 이지만,
+  - 실제 관측상 near-miss 가 route_filter 에 과도하게 집중되어 있어,
+  - 완전 유지보다 **작은 예외창을 두는 편이 병목 완화 대비 리스크가 관리 가능**하다.
+- 구체적으로는:
+  - 실제 정책 변경 전
+    1. `trend_strategy_route_blocked` 표본에 추가 구조화 필드 기록
+    2. `sideways_breakout_exception` 조건안을 문서화
+    3. 그 조건으로 shadow / backtest 재현
+
+### 사실 / 해석 / 제안 구분
+- **사실:** direct block rule 은 `trend_strategy_route_blocked` 이다.
+- **해석:** sideways 에서 trend_following 전면 금지는 설계 의도이지만, 현재 시장/classifier 조합에서는 과도한 병목으로 작동한다.
+- **제안:** 정책을 즉시 전면 완화하지 말고, **sideways 예외 허용 조건을 좁게 추가하는 방향**이 최우선이다.
+
 ## Next Steps
 
 1. **Route filter 완화 방안 검토** (우선순위 높음)
