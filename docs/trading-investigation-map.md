@@ -883,3 +883,126 @@
 - ⏳ threshold 실제 변경은 미수행
 - ⏳ git commit 미수행
 
+---
+
+## 16. trend_following BUY near-miss 관측 설계 (2026-04-12 12:25 UTC)
+
+### 왜 추가 설계가 필요한가
+현재 `semi_live_cycle` / `executor_cycle` 로도 일부 해석은 가능하지만, threshold 조정 판단용으로는 아직 부족하다.
+
+부족한 점:
+- `trend_gap_pct`, `momentum_pct` 가 주로 `reason` 문자열 안에 있어 일별 집계가 불편함
+- near-miss 여부가 구조화되어 있지 않음
+- 탈락 지점이 strategy / route / risk / execution 중 어디인지 명확히 남지 않음
+- `0.10%~0.15%` 같은 threshold 근처 band 집계가 어려움
+
+### near-miss 정의안 (운영용 3분류)
+
+#### 1) Threshold near-miss
+- 정의: `trend_gap_pct` 가 BUY threshold 아래지만 근처 band 에 위치
+- 예: `0.10% <= trend_gap_pct < 0.15%`
+- 의미: threshold 완화 시 실제로 살아날 수 있는 후보군
+
+#### 2) Confirm-fail near-miss
+- 정의: `trend_gap_pct` 는 근처/초과했지만 momentum, route, sideway, risk 조건 때문에 탈락
+- 예:
+  - `trend_gap_pct >= 0.10%` 이지만 `momentum_pct <= 0`
+  - `trend_strategy_route_blocked`
+  - sideway/risk filter 로 hold 전환
+- 의미: threshold 보다 다른 보조 조건이 병목인지 확인 가능
+
+#### 3) Execution near-miss
+- 정의: strategy/review 단계는 통과 가능했거나 매우 근접했지만 실행/선택 단계에서 탈락
+- 예:
+  - `meaningful_order_notional` / `total_exposure_limit`
+  - sell 우선 처리
+  - 후보 선택 경쟁에서 미선정
+- 의미: threshold 가 아니라 실행 정책 병목인지 분리 가능
+
+### 최소 로그/필드 제안 (가장 중요)
+`semi_live_cycle.payload.signal.meta.near_miss` 또는 동등 위치에 아래 필드 추가 권장:
+
+- `is_near_miss`
+- `category` (`threshold` / `confirm_fail` / `execution`)
+- `stage` (`strategy_signal` / `route_filter` / `risk_review` / `strategy_selection` / `execution_guard` / `execution_priority`)
+- `buy_threshold_pct`
+- `trend_gap_pct`
+- `trend_gap_to_threshold_pct`
+- `momentum_pct`
+
+여유가 있으면 추가:
+- `subtype`
+- `near_miss_floor_pct`
+- `block_reason`
+- `would_buy_if_only_gap_relaxed`
+- `market_regime`
+- `volatility_state`
+
+### 집계 단위 제안
+
+#### 사이클 단위
+- cycle당 `threshold_count`
+- cycle당 `confirm_fail_count`
+- cycle당 `execution_count`
+- cycle당 `trend_gap_band_counts`
+
+#### 심볼 단위
+- symbol/day near-miss count
+- symbol/day avg `trend_gap_to_threshold_pct`
+- symbol/day category 분포
+
+#### 일별 단위
+threshold 조정 판단용 핵심 지표:
+- `trend_following_buy_threshold_near_miss_count`
+- `trend_following_buy_confirm_fail_count`
+- `trend_following_buy_execution_near_miss_count`
+- `0.10~0.12%`, `0.12~0.15%` band count
+- near-miss 중 `momentum > 0` 비율
+- near-miss 중 `sideways` 비율
+
+### threshold 조정 판단 규칙(권장)
+- `0.12~0.15%` 구간 near-miss 가 3일 이상 누적되고
+- 그중 `momentum > 0` 비율이 높고
+- route/risk/execution 병목보다 threshold 병목 비율이 높으면
+- `0.15% → 0.12%` 완화 검토 가치가 높음
+
+반대로,
+- near-miss 대부분이 `momentum <= 0` 또는 `route_blocked` 이면
+- threshold 완화 효과는 제한적임
+
+### 최소 수정 구현안
+
+#### 낮은 난이도
+- `TrendFollowingStrategy.generate_signal()` 에
+  - `trend_gap_pct`, `momentum_pct`, `buy_threshold_pct` 를 `signal.meta` 로 구조화
+- `TradingCycleService.run()` 에서
+  - trend_following hold 케이스 중 near-miss window 판정 후 `signal.meta.near_miss` 추가
+- 기존 `run_history` 저장 구조 그대로 활용
+
+**장점:** 가장 최소 침습적이고 지금 바로 구현 가능
+
+#### 중간 난이도
+- 낮은 난이도 포함
+- `AutoTradeService.run_once()` / `_handle_buy()` 에서 execution near-miss summary 추가
+- `executor_cycle` 에 `near_miss_summary` 포함
+
+**장점:** threshold 문제와 실행 정책 문제를 함께 볼 수 있음
+
+### 운영 노이즈 방지 원칙
+- 모든 hold 를 기록하지 않고 near-miss window 해당 케이스만 구조화
+- 텍스트 로그 추가보다 `run_history` JSON 확장 우선
+- band 는 2~3개만 유지 (`0.10~0.12%`, `0.12~0.15%`, optional `>=0.15 but blocked`)
+
+### 지금 바로 구현해도 되는가?
+**예. 낮은 난이도 안은 지금 바로 구현해도 된다.**
+
+근거:
+- 기존 `signal.meta`, `review`, `run_history` 구조를 재사용 가능
+- 별도 로그 스팸 없이 JSON payload 확장 수준
+- threshold 조정 판단에 필요한 근거를 가장 빨리 축적 가능
+
+다만 이번 단계에서는 설계/문서화 우선이며, 실제 구현은 후속 작업으로 분리하는 편이 안전하다.
+
+### 추가 문서
+- ✅ `docs/trend-following-near-miss-observability-design.md` 추가
+
