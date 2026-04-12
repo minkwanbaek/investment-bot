@@ -91,7 +91,7 @@ strategy_route:
 risk_control:
   higher_tf_bias_filter_enabled: false
   high_volatility_defense_enabled: true
-  time_blacklist_filter_enabled: true
+  time_blacklist_filter_enabled: false
   blocked_hours:
   - 0
   - 1
