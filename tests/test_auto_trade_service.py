@@ -1,5 +1,13 @@
+import json
+import logging
+
+import pytest
+
 from investment_bot.core.settings import Settings
 from investment_bot.services.auto_trade_service import AutoTradeService
+from investment_bot.models.trade_log import TradeLogSchema
+from investment_bot.services.ledger_store import LedgerStore
+from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.run_history_store import RunHistoryStore
 from investment_bot.services.strategy_selection_service import StrategySelectionService
@@ -12,6 +20,9 @@ class FakeShadowService:
             ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
             ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
         }
+
+    def invalidate_cache(self) -> None:
+        pass
 
     def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5):
         cfg = self.by_symbol_strategy[(symbol, strategy_name)]
@@ -26,6 +37,101 @@ class FakeShadowService:
                 "market_regime": cfg.get("market_regime", {"regime": "unknown"}),
             }
         }
+
+
+def test_paper_broker_appends_trade_log_entry_on_buy(tmp_path):
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+
+    result = broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following',
+            'symbol': 'BTC/KRW',
+            'action': 'buy',
+            'confidence': 0.8,
+            'size_scale': 1.0,
+            'reason': 'entry signal',
+            'strategy_version': 'v1.0-base',
+        },
+        execution_price=10000.0,
+    )
+
+    assert result['status'] == 'recorded'
+    payload = json.loads(ledger_path.read_text(encoding='utf-8'))
+    trade_logs = payload.get('trade_logs', [])
+    assert len(trade_logs) == 1
+    entry = trade_logs[0]
+    assert entry['symbol'] == 'BTC/KRW'
+    assert entry['side'] == 'buy'
+    assert entry['entry_price'] == 10005.0
+    assert entry['quantity'] == 1.0
+    assert entry['entry_reason'] == 'entry signal'
+    assert entry['trade_id']
+    assert entry['strategy_version'] == 'v1.0-base'
+    assert entry['market_regime'] is None
+    assert entry['volatility_state'] is None
+    assert entry['higher_tf_bias'] is None
+
+
+def test_ledger_store_trade_log_validation_rejects_missing_required_entry_field(tmp_path):
+    ledger_store = LedgerStore(str(tmp_path / 'ledger.json'))
+
+    try:
+        ledger_store.append_trade_log_entry(
+            TradeLogSchema(
+                trade_id='test-1',
+                strategy_version=None,
+                symbol='BTC/KRW',
+                side='buy',
+                entry_time=None,
+                entry_price=10000.0,
+                quantity=1.0,
+            )
+        )
+        assert False, 'expected validation failure'
+    except Exception as exc:
+        assert 'entry_time' in str(exc)
+
+
+def test_paper_broker_updates_latest_open_trade_log_on_sell(tmp_path):
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following',
+            'symbol': 'BTC/KRW',
+            'action': 'buy',
+            'confidence': 0.8,
+            'size_scale': 1.0,
+            'reason': 'entry signal',
+            'strategy_version': 'v1.0-base',
+        },
+        execution_price=10000.0,
+    )
+    sell_result = broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following',
+            'symbol': 'BTC/KRW',
+            'action': 'sell',
+            'confidence': 0.8,
+            'size_scale': 1.0,
+            'reason': 'exit signal',
+            'strategy_version': 'v1.0-base',
+        },
+        execution_price=10200.0,
+    )
+
+    assert sell_result['status'] == 'recorded'
+    payload = json.loads(ledger_path.read_text(encoding='utf-8'))
+    trade_logs = payload.get('trade_logs', [])
+    assert len(trade_logs) == 1
+    entry = trade_logs[0]
+    assert entry['exit_price'] == 10194.9
+    assert entry['exit_reason'] == 'exit signal'
+    assert entry['exit_time'] is not None
+    assert entry['gross_pnl'] == 184.8975
+    assert entry['net_pnl'] == 179.8
 
 
 class FakeLiveExecutionService:
@@ -65,6 +171,344 @@ def make_service(tmp_path, settings: Settings, shadow: FakeShadowService, accoun
         run_history_service=RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json'))),
         strategy_selection_service=StrategySelectionService(),
     )
+
+
+def test_paper_broker_appends_market_context_fields_on_buy(tmp_path):
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+
+    result = broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following',
+            'symbol': 'BTC/KRW',
+            'action': 'buy',
+            'confidence': 0.8,
+            'size_scale': 1.0,
+            'reason': 'entry signal',
+            'strategy_version': 'v1.0-base',
+            'market_regime': 'trend_up',
+            'volatility_state': 'normal',
+            'higher_tf_bias': 'bullish',
+        },
+        execution_price=10000.0,
+    )
+
+    assert result['status'] == 'recorded'
+    payload = json.loads(ledger_path.read_text(encoding='utf-8'))
+    entry = payload['trade_logs'][0]
+    assert entry['market_regime'] == 'trend_up'
+    assert entry['volatility_state'] == 'normal'
+    assert entry['higher_tf_bias'] == 'bullish'
+
+
+def test_trading_cycle_classifies_market_context_fields():
+    from investment_bot.models.market import Candle
+    from investment_bot.services.market_regime_classifier import MarketRegimeClassifier
+
+    candles = []
+    base = 10000.0
+    for i in range(30):
+        open_price = base + (i * 10)
+        close_price = open_price + 30
+        candles.append(
+            Candle(
+                symbol='BTC/KRW',
+                timeframe='1h',
+                open=open_price,
+                high=close_price + 20,
+                low=open_price - 20,
+                close=close_price,
+                volume=100 + i,
+                timestamp=f'2026-01-01T{i:02d}:00:00Z',
+            )
+        )
+
+    market = MarketRegimeClassifier().classify(candles)
+
+    assert market['regime'] in {'uptrend', 'downtrend', 'ranging', 'mixed', 'unknown'}
+    assert market['volatility_state'] in {'low', 'normal', 'high'}
+    assert market['higher_tf_bias'] in {'bullish', 'bearish', 'neutral'}
+
+
+def test_market_regime_classifier_returns_expected_shape():
+    from investment_bot.models.market import Candle
+    from investment_bot.services.market_regime_classifier import MarketRegimeClassifier
+
+    candles = []
+    base = 10000.0
+    for i in range(30):
+        open_price = base + (i * 10)
+        close_price = open_price + 30
+        candles.append(
+            Candle(
+                symbol='BTC/KRW',
+                timeframe='1h',
+                open=open_price,
+                high=close_price + 20,
+                low=open_price - 20,
+                close=close_price,
+                volume=100 + i,
+                timestamp=f'2026-01-01T{i:02d}:00:00Z',
+            )
+        )
+
+    result = MarketRegimeClassifier().classify(candles)
+    assert result['regime'] in {'uptrend', 'downtrend', 'ranging', 'mixed', 'unknown'}
+    assert result['volatility_state'] in {'low', 'normal', 'high'}
+    assert result['higher_tf_bias'] in {'bullish', 'bearish', 'neutral'}
+    assert 'trend_gap_pct' in result
+    assert 'range_pct' in result
+    assert 'momentum_pct' in result
+
+
+def test_trading_cycle_route_block_reason_for_trend_strategy_on_ranging():
+    from investment_bot.risk.controller import RiskController
+    from investment_bot.services.trading_cycle import TradingCycleService
+
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=None, min_order_notional=5000.0)
+    service = TradingCycleService(risk_controller=RiskController(), paper_broker=broker)
+    assert service._route_block_reason('trend_following', {'regime': 'ranging'}) == 'trend_strategy_route_blocked'
+
+
+def test_trading_cycle_route_block_reason_for_mean_reversion_on_uptrend():
+    from investment_bot.risk.controller import RiskController
+    from investment_bot.services.trading_cycle import TradingCycleService
+
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=None, min_order_notional=5000.0)
+    service = TradingCycleService(risk_controller=RiskController(), paper_broker=broker)
+    assert service._route_block_reason('mean_reversion', {'regime': 'uptrend'}) == 'range_strategy_route_blocked'
+
+
+def test_trading_cycle_route_block_reason_for_uncertain_regime():
+    from investment_bot.risk.controller import RiskController
+    from investment_bot.services.trading_cycle import TradingCycleService
+
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=None, min_order_notional=5000.0)
+    service = TradingCycleService(risk_controller=RiskController(), paper_broker=broker)
+    assert service._route_block_reason('trend_following', {'regime': 'mixed'}) == 'uncertain_regime_blocked'
+
+
+def test_risk_controller_blocks_buy_on_bearish_higher_tf_bias(monkeypatch):
+    from investment_bot.models.signal import TradeSignal
+    from investment_bot.risk.controller import RiskController
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, 'blocked_hours', [])
+    signal = TradeSignal(strategy_name='trend_following', symbol='BTC/KRW', action='buy', confidence=0.8, reason='test')
+    signal.meta = {'higher_tf_bias': 'bearish', 'volatility_state': 'normal', 'losing_streak': 0}
+    review = RiskController(min_order_notional=5000, base_entry_notional=10000).review(signal, cash_balance=100000, latest_price=10000)
+    assert review['approved'] is False
+    assert 'higher_tf_bias_mismatch' in review['reason']
+
+
+def test_risk_controller_reduces_size_on_high_volatility_and_losing_streak(monkeypatch):
+    from investment_bot.models.signal import TradeSignal
+    from investment_bot.risk.controller import RiskController
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, 'blocked_hours', [])
+    signal = TradeSignal(strategy_name='trend_following', symbol='BTC/KRW', action='buy', confidence=1.0, reason='test')
+    signal.meta = {'higher_tf_bias': 'bullish', 'volatility_state': 'high', 'losing_streak': 3}
+    review = RiskController(min_order_notional=5000, base_entry_notional=10000).review(signal, cash_balance=100000, latest_price=10000)
+    assert review['approved'] is True
+    assert review['risk_mode'] == 'reduced'
+    assert review['size_scale'] > 0
+    assert review['target_notional'] <= 5000
+
+
+def test_paper_broker_tracks_losing_streak_on_loss(tmp_path):
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following', 'symbol': 'BTC/KRW', 'action': 'buy',
+            'confidence': 0.8, 'size_scale': 1.0, 'reason': 'entry', 'strategy_version': 'v1.0-base'
+        },
+        execution_price=10000.0,
+    )
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following', 'symbol': 'BTC/KRW', 'action': 'sell',
+            'confidence': 0.8, 'size_scale': 1.0, 'reason': 'exit', 'strategy_version': 'v1.0-base'
+        },
+        execution_price=9000.0,
+    )
+    assert broker.losing_streak == 1
+    state = broker.export_state()
+    assert state['losing_streak'] == 1
+
+
+def test_paper_broker_sets_exit_rule_metadata_on_buy(tmp_path):
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following', 'symbol': 'BTC/KRW', 'action': 'buy',
+            'confidence': 0.8, 'size_scale': 1.0, 'reason': 'entry', 'strategy_version': 'v1.0-base'
+        },
+        execution_price=10000.0,
+    )
+    pos = broker.positions['BTC/KRW']
+    assert pos['stop_price'] is not None
+    assert pos['tp1_price'] is not None
+    assert pos['tp1_done'] is False
+
+
+def test_paper_broker_partial_take_profit_trigger(tmp_path):
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following', 'symbol': 'BTC/KRW', 'action': 'buy',
+            'confidence': 0.8, 'size_scale': 2.0, 'reason': 'entry', 'strategy_version': 'v1.0-base'
+        },
+        execution_price=10000.0,
+    )
+    result = broker.evaluate_exit_rules('BTC/KRW', market_price=10350.0)
+    assert result['status'] == 'triggered'
+    assert result['reason'] == 'partial_take_profit'
+    assert result['size_scale'] == 1.0
+
+
+def test_paper_broker_trailing_stop_trigger(tmp_path):
+    from datetime import datetime, timezone
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following', 'symbol': 'BTC/KRW', 'action': 'buy',
+            'confidence': 0.8, 'size_scale': 1.0, 'reason': 'entry', 'strategy_version': 'v1.0-base'
+        },
+        execution_price=10000.0,
+    )
+    broker.evaluate_exit_rules('BTC/KRW', market_price=10300.0, now=datetime.now(timezone.utc))
+    result = broker.evaluate_exit_rules('BTC/KRW', market_price=10150.0, now=datetime.now(timezone.utc))
+    assert result['status'] == 'triggered'
+    assert result['reason'] == 'trailing_stop'
+
+
+def test_paper_broker_timeout_exit_trigger(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following', 'symbol': 'BTC/KRW', 'action': 'buy',
+            'confidence': 0.8, 'size_scale': 1.0, 'reason': 'entry', 'strategy_version': 'v1.0-base'
+        },
+        execution_price=10000.0,
+    )
+    broker.positions['BTC/KRW']['opened_at'] = (datetime.now(timezone.utc) - timedelta(minutes=120)).isoformat().replace('+00:00', 'Z')
+    result = broker.evaluate_exit_rules('BTC/KRW', market_price=10020.0, now=datetime.now(timezone.utc))
+    assert result['status'] == 'triggered'
+    assert result['reason'] == 'timeout'
+
+
+def test_standard_backtest_returns_config_snapshot():
+    from investment_bot.services.backtest_service import BacktestService
+
+    class FakeReplayAdapter:
+        def __init__(self):
+            self._cursor = {}
+
+    class FakeMarketDataService:
+        def __init__(self):
+            self.registry = {'replay': FakeReplayAdapter()}
+        def get_recent_candles(self, adapter_name, symbol, timeframe, limit):
+            from investment_bot.models.market import Candle
+            return [
+                Candle(symbol=symbol, timeframe=timeframe, open=100, high=110, low=90, close=100 + i, volume=1, timestamp=f'2026-01-01T00:0{i}:00Z')
+                for i in range(limit)
+            ]
+        def advance_replay(self, symbol, timeframe, steps):
+            return None
+
+    class FakeTradingCycleService:
+        def run(self, strategy_name, candles):
+            return {
+                'signal': {'action': 'hold'},
+                'review': {'approved': False},
+                'portfolio': {'total_equity': 100000.0},
+            }
+
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=None, min_order_notional=5000.0)
+    service = BacktestService(
+        market_data_service=FakeMarketDataService(),
+        paper_broker=broker,
+        trading_cycle_service=FakeTradingCycleService(),
+        metrics_service=__import__('investment_bot.services.metrics_service', fromlist=['MetricsService']).MetricsService(),
+    )
+    result = service.run_standard_backtest('trend_following', 'BTC/KRW', '1h', 5, 2)
+    assert 'run_id' in result
+    assert result['config_snapshot']['strategy_name'] == 'trend_following'
+    assert result['config_snapshot']['fee_model'] == 'paper_broker_fee_pct'
+
+
+def test_walkforward_returns_segment_results():
+    from investment_bot.services.backtest_service import BacktestService
+    from investment_bot.services.metrics_service import MetricsService
+
+    class FakeReplayAdapter:
+        def __init__(self):
+            self._cursor = {}
+
+    class FakeMarketDataService:
+        def __init__(self):
+            self.registry = {'replay': FakeReplayAdapter()}
+        def get_recent_candles(self, adapter_name, symbol, timeframe, limit):
+            from investment_bot.models.market import Candle
+            return [
+                Candle(symbol=symbol, timeframe=timeframe, open=100, high=110, low=90, close=100 + i, volume=1, timestamp=f'2026-01-01T00:0{i}:00Z')
+                for i in range(limit)
+            ]
+        def advance_replay(self, symbol, timeframe, steps):
+            return None
+
+    class FakeTradingCycleService:
+        def run(self, strategy_name, candles):
+            return {'signal': {'action': 'hold'}, 'review': {'approved': False}, 'portfolio': {'total_equity': 100000.0, 'total_realized_pnl': 0.0, 'total_unrealized_pnl': 0.0, 'order_count': 0}}
+
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=None, min_order_notional=5000.0)
+    service = BacktestService(FakeMarketDataService(), broker, FakeTradingCycleService(), MetricsService())
+    result = service.run_walkforward('trend_following', 'BTC/KRW', '1h', 5, train_steps=10, test_steps=2, segments=3)
+    assert result['segments'] == 3
+    assert len(result['results']) == 3
+
+
+def test_paper_compare_service_returns_summary():
+    from investment_bot.services.paper_compare_service import PaperCompareService
+    result = PaperCompareService().compare(
+        backtest_trades=[{'entry_price': 100.0, 'net_pnl': 10.0}, {'entry_price': 110.0, 'net_pnl': -5.0}],
+        paper_trades=[{'entry_price': 101.0, 'net_pnl': 9.0}],
+    )
+    assert result['matched_count'] == 1
+    assert result['missed_trade_count'] == 1
+    assert result['avg_fill_price_diff'] == 1.0
+
+
+def test_live_deploy_checklist_reports_completion():
+    from investment_bot.services.live_deploy_checklist_service import LiveDeployChecklistService
+    result = LiveDeployChecklistService().build(
+        version='v1.2.0',
+        completed={
+            'backtest_completed': True,
+            'out_of_sample_checked': True,
+            'walkforward_checked': True,
+            'paper_trading_checked': True,
+            'fees_and_slippage_checked': True,
+            'max_loss_checked': True,
+            'feature_flag_ready': True,
+            'rollback_ready': True,
+        },
+        approver='mk',
+    )
+    assert result['deploy_candidate_version'] == 'v1.2.0'
+    assert result['all_completed'] is True
+    assert result['approver'] == 'mk'
 
 
 def test_auto_trade_service_skips_when_krw_balance_is_below_threshold(tmp_path):
@@ -172,6 +616,22 @@ def test_auto_trade_service_reports_managed_notional_when_sell_is_blocked_by_thr
     assert result['reason'] == 'below_min_managed_position_notional'
     assert result['managed_notional'] == 9987.8346
     assert result['min_managed_position_notional'] == 10000.0
+
+
+def test_auto_trade_service_logs_hold_summary_when_all_candidates_are_non_actionable(tmp_path, caplog):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.12, "target_notional": 0.0, "market_regime": {"regime": "mixed"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.34, "target_notional": 0.0, "market_regime": {"regime": "mixed"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "mixed"}},
+    })
+    service = make_service(tmp_path, Settings(symbols=["BTC/KRW"]), shadow, FakeAccountService(krw_cash=50000))
+    with caplog.at_level(logging.INFO):
+        result = service.run_once()
+    assert result["status"] == "skipped"
+    assert result["reason"] == "non_actionable_signal"
+    assert "top_hold_candidates" in caplog.text
+    assert "BTC/KRW" in caplog.text
+    assert "strategy_name" in caplog.text
 
 
 def test_auto_trade_service_stop_loss_uses_price_pct_not_quantity(tmp_path):
