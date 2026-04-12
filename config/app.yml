@@ -77,10 +77,15 @@ auto_trade:
 live:
   confirm_live_trading: true
 sideway_filter:
-  enabled: false
+  enabled: true
   trend_gap_threshold: 0.0015
   range_threshold: 0.01
   volatility_block_on_low: true
+  breakout_exception_enabled: true
+  breakout_exception_momentum_min: 0.0
+  breakout_exception_trend_gap_ratio: 0.7
+  breakout_exception_allow_bearish_higher_tf: false
+  breakout_exception_allow_low_volatility: false
 strategy_route:
   trend_strategy_allowed_regimes:
   - uptrend

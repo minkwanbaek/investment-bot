@@ -65,6 +65,11 @@ class SidewayFilterConfig(BaseModel):
     trend_gap_threshold: float = 0.0015
     range_threshold: float = 0.01
     volatility_block_on_low: bool = True
+    breakout_exception_enabled: bool = False
+    breakout_exception_momentum_min: float = 0.0
+    breakout_exception_trend_gap_ratio: float = 0.7
+    breakout_exception_allow_bearish_higher_tf: bool = False
+    breakout_exception_allow_low_volatility: bool = False
 
 
 class StrategyRouteConfig(BaseModel):
@@ -167,6 +172,11 @@ class Settings(BaseSettings):
     sideway_filter_trend_gap_threshold: float = 0.0015
     sideway_filter_range_threshold: float = 0.01
     sideway_filter_volatility_block_on_low: bool = True
+    sideway_filter_breakout_exception_enabled: bool = False
+    sideway_filter_breakout_exception_momentum_min: float = 0.0
+    sideway_filter_breakout_exception_trend_gap_ratio: float = 0.7
+    sideway_filter_breakout_exception_allow_bearish_higher_tf: bool = False
+    sideway_filter_breakout_exception_allow_low_volatility: bool = False
     trend_strategy_allowed_regimes: list[str] = Field(default_factory=lambda: ["uptrend", "downtrend"])
     range_strategy_allowed_regimes: list[str] = Field(default_factory=lambda: ["sideways"])
     uncertain_block_enabled: bool = True
@@ -264,6 +274,11 @@ def get_settings() -> Settings:
         sideway_filter_trend_gap_threshold=file_config.sideway_filter.trend_gap_threshold,
         sideway_filter_range_threshold=file_config.sideway_filter.range_threshold,
         sideway_filter_volatility_block_on_low=file_config.sideway_filter.volatility_block_on_low,
+        sideway_filter_breakout_exception_enabled=file_config.sideway_filter.breakout_exception_enabled,
+        sideway_filter_breakout_exception_momentum_min=file_config.sideway_filter.breakout_exception_momentum_min,
+        sideway_filter_breakout_exception_trend_gap_ratio=file_config.sideway_filter.breakout_exception_trend_gap_ratio,
+        sideway_filter_breakout_exception_allow_bearish_higher_tf=file_config.sideway_filter.breakout_exception_allow_bearish_higher_tf,
+        sideway_filter_breakout_exception_allow_low_volatility=file_config.sideway_filter.breakout_exception_allow_low_volatility,
         trend_strategy_allowed_regimes=file_config.strategy_route.trend_strategy_allowed_regimes,
         range_strategy_allowed_regimes=file_config.strategy_route.range_strategy_allowed_regimes,
         uncertain_block_enabled=file_config.strategy_route.uncertain_block_enabled,

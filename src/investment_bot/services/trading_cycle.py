@@ -37,7 +37,13 @@ class TradingCycleService:
 
         route_block_reason = self._route_block_reason(strategy_name=strategy_name, market_info=market_info)
         force_exit = bool(getattr(signal, "meta", {}).get("force_exit", False))
-        if not force_exit and self._should_block_for_sideways(strategy_name=strategy_name, market_info=market_info):
+        
+        # Check for sideways exception pass before blocking
+        exception_pass = None
+        if not force_exit and strategy_name == "trend_following" and market_info.get("regime") == "sideways":
+            exception_pass = self._check_sideways_exception_pass(strategy_name=strategy_name, market_info=market_info)
+        
+        if not force_exit and self._should_block_for_sideways(strategy_name=strategy_name, market_info=market_info) and not exception_pass:
             signal = TradeSignal(
                 strategy_name=signal.strategy_name,
                 symbol=signal.symbol,
@@ -55,7 +61,7 @@ class TradingCycleService:
                 reason=f"{route_block_reason}; {signal.reason}",
                 meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason=route_block_reason),
             )
-        elif not force_exit and strategy_name == "trend_following" and market_info.get("regime") == "sideways":
+        elif not force_exit and strategy_name == "trend_following" and market_info.get("regime") == "sideways" and not exception_pass:
             signal = TradeSignal(
                 strategy_name=signal.strategy_name,
                 symbol=signal.symbol,
@@ -64,6 +70,13 @@ class TradingCycleService:
                 reason=f"market_regime=sideways; {signal.reason}",
                 meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason="market_regime_sideways_hold"),
             )
+        elif exception_pass:
+            # Exception pass applied - log it for observability
+            signal.meta = {
+                **getattr(signal, "meta", {}),
+                "route_exception_pass": True,
+                "exception_reason": exception_pass,
+            }
 
         signal.meta = {
             **getattr(signal, "meta", {}),
@@ -124,9 +137,59 @@ class TradingCycleService:
             return True
         if abs(float(market_info.get("trend_gap_pct", 0.0) or 0.0)) < settings.sideway_filter_trend_gap_threshold:
             return True
-        if float(market_info.get("range_pct", 0.0) or 0.0) < settings.sideway_filter_range_threshold:
+        if settings.sideway_filter_range_threshold and float(market_info.get("range_pct", 0.0) or 0.0) < settings.sideway_filter_range_threshold:
             return True
         return False
+
+    def _check_sideways_exception_pass(self, strategy_name: str, market_info: dict) -> str | None:
+        """Check if sideways trend_following should be allowed via narrow exception window.
+        
+        Returns exception reason string if pass granted, None otherwise.
+        """
+        settings = get_settings()
+        if not settings.sideway_filter_breakout_exception_enabled:
+            return None
+        if strategy_name != "trend_following":
+            return None
+        if market_info.get("regime") != "sideways":
+            return None
+        
+        trend_gap_pct = float(market_info.get("trend_gap_pct", 0.0) or 0.0)
+        momentum_pct = float(market_info.get("momentum_pct", 0.0) or 0.0)
+        volatility_state = market_info.get("volatility_state", "normal")
+        higher_tf_bias = market_info.get("higher_tf_bias", "neutral")
+        
+        # Check momentum: must be positive
+        if momentum_pct <= settings.sideway_filter_breakout_exception_momentum_min:
+            return None
+        
+        # Check trend_gap: must be near threshold (at least ratio × threshold)
+        min_trend_gap = settings.sideway_filter_trend_gap_threshold * settings.sideway_filter_breakout_exception_trend_gap_ratio
+        if trend_gap_pct < min_trend_gap:
+            return None
+        
+        # Check higher_tf_bias: must not be bearish (unless explicitly allowed)
+        if not settings.sideway_filter_breakout_exception_allow_bearish_higher_tf:
+            if higher_tf_bias == "bearish":
+                return None
+        
+        # Check volatility: must not be low (unless explicitly allowed)
+        if not settings.sideway_filter_breakout_exception_allow_low_volatility:
+            if volatility_state == "low":
+                return None
+        
+        # All conditions passed - grant exception pass
+        reasons = []
+        if momentum_pct > 0:
+            reasons.append("momentum_positive")
+        if trend_gap_pct >= min_trend_gap:
+            reasons.append(f"trend_gap_near_threshold({trend_gap_pct:.4f})")
+        if higher_tf_bias != "bearish":
+            reasons.append(f"higher_tf_bias={higher_tf_bias}")
+        if volatility_state != "low":
+            reasons.append(f"volatility={volatility_state}")
+        
+        return "sideways_breakout_exception: " + ", ".join(reasons)
 
     def _enrich_near_miss(self, signal: TradeSignal, market_info: dict) -> TradeSignal:
         """Add near-miss observability for trend_following hold signals."""

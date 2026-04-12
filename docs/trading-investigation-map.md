@@ -1372,3 +1372,67 @@ trend_gap: 0.04~0.07%, momentum: 0.07~0.21%
 2. **Near-miss 일별 집계 자동화** (운영 개선)
 3. **3 일 이상 데이터 누적 후 threshold 재검토** (중기)
 
+---
+
+## 2026-04-12 22:24 UTC — Sideways 제한적 예외 허용안 구현 완료
+
+### 변경 개요
+- **목표:** sideways 에서 trend_following 의 BUY 기회를 늘리되, 전략을 과도하게 풀지 않도록 좁은 예외창 적용
+- **접근:** hard gate 를 "좁은 조건부 통과"로 완화
+
+### 적용된 예외 조건
+- **설정 활성화:** `sideway_filter.breakout_exception_enabled: true`
+- **통과 조건 (모두 만족):**
+  1. `momentum_pct > 0.0` (양수 모멘텀)
+  2. `trend_gap_pct >= threshold × 0.7` (threshold 의 70% 이상)
+  3. `higher_tf_bias != bearish` (고차 timeframe 이 bearish 아님)
+  4. `volatility_state != low` (변동성이 너무 낮지 않음)
+
+### 코드 변경
+1. **settings.py**
+   - `SidewayFilterConfig` 에 예외 관련 설정 추가:
+     - `breakout_exception_enabled: bool`
+     - `breakout_exception_momentum_min: float`
+     - `breakout_exception_trend_gap_ratio: float`
+     - `breakout_exception_allow_bearish_higher_tf: bool`
+     - `breakout_exception_allow_low_volatility: bool`
+   - `Settings` 클래스에 위 설정 매핑 추가
+
+2. **trading_cycle.py**
+   - `_check_sideways_exception_pass()` 메서드 추가
+     - 예외 조건 체크 및 통과 사유 반환
+   - `_should_block_for_sideways()` 로직 수정
+     - 예외 통과 시 block 스킵
+   - signal.meta 에 `route_exception_pass: True` 및 `exception_reason` 추가
+     - `route_block` vs `route_exception_pass` 구분 가능
+
+3. **config/app.yml**
+   - `sideway_filter.breakout_exception_enabled: true`
+   - `breakout_exception_trend_gap_ratio: 0.7`
+   - `breakout_exception_allow_bearish_higher_tf: false`
+   - `breakout_exception_allow_low_volatility: false`
+
+### 검증 결과 (run_once)
+- **실행 시각:** 2026-04-12 22:24 UTC 재시작 후 즉시
+- **관측:**
+  - 대부분의 sideways 표본이 `volatility_state: low` 로 인해 예외 조건 미달
+  - HBAR/KRW: `trend_gap_pct=0.0013` (threshold 의 87%), `momentum_pct=0.0079` (양수) but `volatility_state: low` → block
+  - TRX/KRW: `trend_gap_pct=0.0006`, `momentum_pct=0.0021` (양수) but `volatility_state: low` → block
+  - ETH/KRW: `trend_gap_pct=0.0002`, `momentum_pct=0.0003` (양수) but `trend_gap` 미달 + `volatility_state: low` → block
+- **해석:**
+  - 현재 시장이 전반적으로 `volatility_state: low` 상태라 예외 창이 실제로 열리지 않음
+  - 변동성이 normal/high 로 전환되는 구간에서 예외 효과 관측 가능할 것
+
+### 다음 병목
+1. **변동성 부족:** 현재 대부분의 자산이 `volatility_state: low` 로 분류되어 예외 조건 4 번에서 탈락
+2. **trend_gap 미달:** 일부 자산은 momentum 은 양수이나 trend_gap 이 threshold 의 70% 에 미치지 못함
+
+### 향후 관측 포인트
+- 변동성이 normal 이상으로 전환될 때 예외 통과 표본 발생 예상
+- `route_exception_pass: True` meta 필드로 실제 통과 건수 추적 가능
+- 너무 넓게 열리지 않는지 모니터링 필요 (현재 조건은 상당히 보수적)
+
+### 문서/커밋 상태
+- ✅ 문서 업데이트 완료 (`docs/trading-investigation-map.md`)
+- ⏳ git commit 대기 (사용자 확인 후)
+
