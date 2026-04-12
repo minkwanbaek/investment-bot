@@ -651,3 +651,132 @@
 - ✅ BUY vs 현재 비교 분석 완료 (09:30 UTC)
 - ✅ 최근 run_history 200건 재검증 완료: BUY 0건, SELL dust rejection 지속 (09:34 UTC)
 - ⏳ git commit 대기 (사용자 확인 후 실행)
+
+
+---
+
+## 14. BUY 제약 분리 분석 완료 (2026-04-12 11:30 UTC)
+
+### 분석 대상: 2026-04-12 05:33 UTC DOGE/KRW BUY (승인된 실제 사례)
+
+### 실제 계산 흐름
+
+#### [1] 전략 신호 생성
+- 전략: `trend_following`
+- symbol: `DOGE/KRW`
+- confidence: `0.4775022956841055`
+- reason: `short_ma=136.67, long_ma=136.12, trend_gap_pct=0.0040, momentum_pct=0.0074`
+- 해석:
+  - `trend_gap_pct = 0.40%` → BUY 임계값 `0.15%` 초과
+  - `momentum_pct = 0.74%` → 양수
+  - 즉 **전략 단계는 명확히 통과**
+
+#### [2] RiskController.review() 결과
+- approved: `true`
+- cash_balance: `71,071.1488 KRW`
+- latest_price: `137.0 KRW`
+- target_notional: `5,000.0 KRW`
+- size_scale: `36.49635036`
+- losing_streak: `0`
+- risk_mode: `normal`
+
+#### [3] 실제 주문 실행 결과
+- requested_size: `0.4775022956841055`
+- approved_size: `36.49635036`
+- execution_price: `137.0685 KRW`
+- fee_pct: `0.05%`
+- fee_paid: `2.5013 KRW`
+- notional_value: `5,002.5 KRW`
+- status: `recorded`
+
+### 외부 제약 vs 내부 제약 분리
+
+#### A. 거래소 외부 제약: `min_order_notional = 5000`
+- 실제 체결 금액: `5,002.5 KRW`
+- 결과: **통과**
+- 결론: 업비트 5천원 하한은 이 사례의 병목이 아님
+
+#### B. 봇 내부 제약: `meaningful_order_notional = 8000`
+- 설정값: `8,000 KRW`
+- review.target_notional: `5,000 KRW`
+- 비교: `5,000 < 8,000`
+- 그런데도 실제 주문은 승인/기록됨
+- 결과: **이 BUY 사례에서는 meaningful_order_notional 이 실행 차단 게이트로 작동하지 않음**
+- 결론: 최소한 이 실제 BUY 사례 기준으로는, 내부 meaningful_order_notional 이 BUY 를 막은 것이 아님
+
+#### C. target_allocation_pct / max_total_exposure_pct
+- 설정값:
+  - `target_allocation_pct = 20.0`
+  - `max_total_exposure_pct = 80.0`
+- 당시 포트폴리오:
+  - cash_balance: `71,071.1488 KRW`
+  - total_equity: `83,938.6626 KRW`
+  - 따라서 총 익스포저는 대략 `15.3%` 수준 (`1 - cash/equity` 근사)
+- 결과:
+  - `max_total_exposure_pct = 80%` 대비 한참 여유 있음
+  - 1회 BUY `5,000 KRW` 는 target allocation 관점에서도 과도하지 않음
+- 결론: **allocation / exposure 계열 내부 제약도 이 사례의 병목이 아님**
+
+#### D. confidence scaling / size scaling
+- confidence: `0.4775`
+- review.size_scale: `36.49635036`
+- broker_result.approved_size: `36.49635036`
+- 실제 notional: `36.49635036 * 137.0685 ≈ 5,002.5 KRW`
+- 결과: confidence/size scaling 은 주문을 0 또는 dust 로 줄이지 않았고, 오히려 최종적으로 거래소 최소금액을 만족하는 주문 크기로 반영됨
+- 결론: **scaling 도 병목이 아님**
+
+### 반대 사례: 승인 실패 BUY 들의 공통점
+
+최근 rejected BUY 사례들(ONT/DOGE/ARB 등, 02:19~02:38 UTC)은 모두 아래 패턴을 가짐.
+- approved: `false`
+- target_notional: `0.0`
+- size_scale: `0.0`
+- reason suffix: `blocked_time_window`
+
+즉 이 구간의 rejected BUY 는
+- 거래소 5천원 하한 이전에,
+- 내부 sizing/exposure 이전에,
+- **시간 필터(time_blacklist_filter)** 에서 먼저 차단됨.
+
+### 최종 병목 분리 결론
+
+#### 1) BUY 가 실제로 생성되는 경우
+- **전략 조건만 맞으면 BUY 는 실제 승인/기록된 사례가 있음**
+- 실제 예: `2026-04-12T05:33:19Z DOGE/KRW`
+- 이 사례에서:
+  - 거래소 5천원 하한 → 통과
+  - meaningful_order_notional 8천원 → 차단하지 않음
+  - exposure / allocation → 차단하지 않음
+  - confidence scaling → 차단하지 않음
+
+#### 2) BUY 가 막힌 과거 사례
+- 02시대 rejected BUY 는 대부분 `blocked_time_window`
+- 즉 이 구간 병목은 **거래소 하한도 아니고, 내부 sizing/exposure 도 아니고, 시간 필터**였음
+
+#### 3) 현재 BUY 0건의 핵심 원인
+- 현재는 time_blacklist_filter 를 꺼도 BUY 가 거의/전혀 안 나옴
+- 따라서 현재 병목은 실행단 제약보다 **전략 단계 (trend_following 진입 조건 미충족)** 에 더 가까움
+- 현재 시장에서는
+  - `trend_gap_pct >= 0.15%`
+  - `momentum_pct > 0`
+  조건이 자주 깨짐
+
+### 실무적 해석
+
+- **업비트 5천원 제약**: 현재 핵심 병목 아님
+- **내부 meaningful_order_notional / allocation / exposure**: 실제 BUY 사례 기준 병목 아님
+- **과거 차단 요인**: `blocked_time_window`
+- **현재 핵심 병목**: 전략 신호 부족 (`trend_following` 조건 미충족)
+
+### 다음 수정 포인트 우선순위
+1. **전략 조건 재검토가 우선**
+   - trend_following threshold 완화 또는 다른 전략 보강 검토
+2. **그 다음 관측성 개선**
+   - review 단계에서 `blocked_stage` 를 명시하면 time filter / sizing / exposure / exchange min 을 즉시 구분 가능
+3. **내부 sizing/exposure 수정은 후순위**
+   - 현재 확보한 실제 BUY 사례만 보면 sizing/exposure 가 주병목이라는 증거는 약함
+
+### 문서/커밋 상태
+- ✅ 문서 업데이트 완료
+- ⏳ git commit 미수행
+
