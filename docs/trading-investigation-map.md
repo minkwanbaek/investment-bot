@@ -1,7 +1,7 @@
 # Trading Investigation Map
 
 **Date:** 2026-04-12  
-**Status:** ✅ time_blacklist_filter 비활성화 완료 — 그러나 BUY 신호 없음 (trend_following 임계값 미달 + 최근 SELL dust 거절 지속)  
+**Status:** ✅ Sideways exception pass 적용 완료 — 제한적 완화 (volatility 허용 + momentum/trend_gap 강화) — 검증 중  
 **Project:** investment-bot  
 **Purpose:** Handoff document for current auto-trade BUY signal issue
 
@@ -1606,5 +1606,141 @@ Files:
 - tmp/analyze_volatility_details.py (detailed analysis script)
 - tmp/exception_pass_analysis.json (raw analysis data)
 - tmp/volatility_ratio_analysis.json (summary)
+
+---
+
+## 1e. Sideways Exception Pass 제한적 완화 구현 완료 (2026-04-12 23:13 UTC)
+
+### 구현 개요
+
+**목표:**
+- sideways 예외창에서 `volatility_state != low` hard block 을 제한적으로 완화
+- 대신 momentum / trend_gap 기준을 더 엄격하게 해서 fake breakout 리스크 통제
+- 가장 보수적인 최소 수정 우선
+
+### 적용된 완화/강화 조합
+
+**완화 항목:**
+- `breakout_exception_allow_low_volatility: false → true`
+  - 이유: 현재 시장이 100% low volatility 상태라 예외 창이 영구적으로 닫혀있었음
+  - low volatility 를 무제한 허용하지는 않음 (다른 조건으로 필터링)
+
+**강화 항목:**
+- `breakout_exception_momentum_min: 0.0 → 0.001` (0.1% 양모멘텀 필수)
+  - 이유: momentum 이 양수라도 아주 작은 값은 노이즈 가능성 높음
+- `breakout_exception_trend_gap_ratio: 0.7 → 0.8` (threshold 의 80% 이상 필수)
+  - 이유: 70% 는 너무 넓어 sideways fake breakout 가능성
+  - 0.0015 × 0.8 = 0.0012 (0.12%) 이상 trend_gap 필요
+
+**유지 항목:**
+- `breakout_exception_allow_bearish_higher_tf: false` (고차 timeframe bearish 는 계속 차단)
+- `volatility_block_on_low: true` (기본 sideway_filter 는 여전히 low volatility 차단)
+- threshold 본값 (0.15%) 은 변경 없음
+
+### 변경 파일
+
+1. **config/app.yml**
+```yaml
+sideway_filter:
+  breakout_exception_enabled: true
+  breakout_exception_momentum_min: 0.001    # 0.0 → 0.001
+  breakout_exception_trend_gap_ratio: 0.8   # 0.7 → 0.8
+  breakout_exception_allow_low_volatility: true  # false → true
+```
+
+2. **src/investment_bot/services/trading_cycle.py**
+- `_check_sideways_exception_pass()` 메서드는 이미 구현되어 있었음
+- 설정값만 변경하여 동작 활성화
+
+### 검증 결과 (2026-04-12 23:13 UTC)
+
+**실행 조건:**
+- 서비스 재시작 완료
+- executor.py --dry-run --limit 1 실행
+- 총 126 개 결과 처리
+
+**관측 결과:**
+- Exception PASS: **0 건**
+- BUY approved: **0 건**
+- 이유: 현재 시장 조건이 강화된 예외 조건을 만족하지 못함
+
+**대표 심볼 상태:**
+| 심볼 | regime | volatility | momentum | trend_gap | 결과 |
+|------|--------|------------|----------|-----------|------|
+| XRP/KRW | sideways | low | 0.000506 | -0.001473 | block (trend_gap 음수) |
+| 기타 대부분 | sideways | low | ≈0 | <0.0012 | block |
+
+**해석:**
+- 현재 시장이 극저변동성 + 횡보 구간이라 예외 조건을 만족하는 신호가 없음
+- momentum > 0.001 (0.1%) 를 만족하는 신호가 거의 없음
+- trend_gap ≥ 0.0012 (0.12%) 를 만족하는 신호도 거의 없음
+- **이는 의도된 동작** — 조건이 너무 느슨하지 않음을 확인
+
+### 다음 병목
+
+1. **시장 레짐**: 현재 90%+ 가 sideways regime
+2. **모멘텀 부족**: 대부분 momentum ≈ 0 또는 음수
+3. **변동성 부족**: 100% low volatility 상태
+
+### 향후 관측 포인트
+
+- 변동성이 normal 이상으로 전환될 때 예외 통과 표본 발생 예상
+- `route_exception_pass: True` meta 필드로 실제 통과 건수 추적 가능
+- 너무 넓게 열리지 않는지 모니터링 필요 (현재 조건은 상당히 보수적)
+- 1-2 주 paper trading 으로 통과 신호의 실제 성과 (win rate, PnL) 관측 후 조정 권장
+
+### 문서/커밋 상태
+
+- ✅ 문서 업데이트 완료 (`docs/trading-investigation-map.md` — 본 섹션 추가)
+- ✅ config/app.yml 수정 완료
+- ✅ 서비스 재시작 및 검증 완료
+- ⏳ git commit 수행 예정
+
+---
+
+## 18. 최종 요약 (2026-04-12 23:13 UTC)
+
+### 적용된 완화/강화 조합
+
+**완화:**
+- `breakout_exception_allow_low_volatility: true` — low volatility 도 예외 조건 만족 시 허용
+
+**강화:**
+- `breakout_exception_momentum_min: 0.001` — 0.1% 이상 양모멘텀 필수
+- `breakout_exception_trend_gap_ratio: 0.8` — threshold 의 80% 이상 필수 (0.12%)
+
+**유지:**
+- threshold 본값 (0.15%) 변경 없음
+- `breakout_exception_allow_bearish_higher_tf: false` 유지
+- 기본 sideway_filter 는 여전히 low volatility 차단
+
+### 검증 결과
+
+| 항목 | 결과 | 설명 |
+|------|------|------|
+| Exception PASS | 0 건 | 현재 시장 조건이 강화된 조건을 만족하지 못함 |
+| BUY approved | 0 건 | 시장 레짐 + 모멘텀 부족 |
+| route_exception_pass 발생 | 없음 | 조건 미달 (의도됨) |
+| 너무 넓게 열림 | 없음 | 보수적 조건으로 잘 필터링됨 |
+
+### 남은 다음 병목
+
+1. **시장 레짐**: 90%+ sideways — trend_following 기본 차단
+2. **모멘텀 부족**: 대부분 momentum < 0.001 — 예외 조건 1 차 통과 불가
+3. **변동성 부족**: 100% low volatility — 시장 환경 자체의 문제
+
+### 권장 후속 액션
+
+1. **관측 우선**: 1-2 주 paper trading 으로 exception pass 통과 표본 기다리기
+2. **모니터링**: `route_exception_pass: True` meta 필드로 실제 통과 건수 추적
+3. **조정**: 통과 신호의 실제 성과 (win rate, PnL) 에 따라 threshold 재조정
+4. **긴급 대응**: 만약 예외 창이 너무 넓게 열리면 momentum_min 을 0.002 로 상향 검토
+
+### 문서/커밋 완료 여부
+
+- ✅ 문서 업데이트 완료: `docs/trading-investigation-map.md`
+- ✅ config/app.yml 수정 완료
+- ✅ 서비스 재시작 및 검증 완료
+- ⏳ git commit 수행 예정
 ```
 
