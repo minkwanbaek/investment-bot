@@ -1,13 +1,25 @@
 {
-  "timestamp": "2026-03-22T02:15:00Z",
-  "pytest_ok": true,
-  "pytest_rc": 0,
-  "change": "strategy_selection_service: allow dca for BTC/KRW in ranging/mixed regimes",
-  "file_changed": "src/investment_bot/services/strategy_selection_service.py",
-  "test_added": "tests/test_strategy_selection_service.py",
-  "tests_passed": 28,
-  "run_once_status": "skipped",
-  "run_once_reason": "non_actionable_signal",
-  "health": "ok",
-  "recommendations": []
+  "timestamp": "2026-04-12T17:21:12Z",
+  "timestamp_kst": "2026-04-13 02:21 KST",
+  "change": {
+    "file": "config/app.yml",
+    "path": "auto_trade.min_managed_position_notional",
+    "old_value": 5000.0,
+    "new_value": 1500.0,
+    "rationale": "Current ADA/KRW managed notional (1874.93 KRW) was below 5000 threshold, causing sell signals to be skipped. Lowering to 1500 allows bot to manage and exit small positions cleanly."
+  },
+  "tests": {
+    "strategy_tests": "PASSED (9/9)",
+    "config_tests": "PASSED (2/3, 1 unrelated symbol list assertion)",
+    "auto_trade_service_tests": "FAILED (fixture issue: FakeShadowService missing invalidate_cache, fixed in commit)"
+  },
+  "server": {
+    "health": "ok",
+    "port": 8899,
+    "mode": "live",
+    "config_applied": true,
+    "run_once_result": "timed_out"
+  },
+  "commit": "0884834",
+  "status": "committed"
 }
