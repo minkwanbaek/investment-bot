@@ -783,6 +783,72 @@
 
 ---
 
+## 17. near-miss 누적 데이터 확인 결과 (2026-04-12 13:43 UTC)
+
+### 확인 범위
+- `data/run_history.json` 최근 누적 구간 재확인
+- `logs/executor.log` 최근 로그 재검색
+- 대상 필드:
+  - `buy_threshold_pct`
+  - `trend_gap_pct`
+  - `trend_gap_to_threshold_pct`
+  - `momentum_pct`
+  - `is_near_miss`
+  - `category`
+  - `stage`
+
+### 결과
+
+#### 1) 최근 누적 structured near-miss 데이터
+- `run_history.json` 기준 **structured trend_following observability row = 0건**
+- 즉, 최근 누적 구간에서 위 필드가 포함된 `semi_live_cycle` / `shadow_cycle` 기록을 확인하지 못함
+
+#### 2) executor 로그 확인 결과
+- `executor.log` 기준 위 near-miss 관련 키워드 검색 결과 **0건**
+- `buy_threshold_pct`, `trend_gap_to_threshold_pct`, `is_near_miss`, `category`, `stage` 모두 최근 로그에서 확인되지 않음
+
+#### 3) 집계 가능 여부
+- near-miss structured row 가 0건이므로 아래 집계는 현재 의미 있게 계산할 수 없음
+  - near-miss 총 건수
+  - category 분포
+  - trend_gap band 분포
+  - momentum 양수 비율
+- 형식상 집계하면 모두 **0건 / N/A** 에 해당
+
+### 해석
+- **near-miss observability 구현 커밋은 존재**하지만, 현재 보관된 최근 run_history / executor 로그 기준으로는 **실제 누적 데이터가 아직 쌓였다고 보기 어렵다**
+- 가능한 해석은 2가지다.
+  1. 구현 이후 실운영/실행 사이클 수가 아직 충분하지 않았거나
+  2. 최근 저장 경로의 run_history 에 새 structured 필드가 반영되기 전 데이터만 주로 남아 있음
+- 그러나 운영 판단 기준에서는 보수적으로 봐야 하므로, **현재 확인 가능한 근거만으로는 near-miss 가 실제로 누적되었다고 결론 내릴 수 없다**
+
+### threshold 조정 판단
+#### `0.12%` 완화
+- **판단 보류**
+- 이유: `0.12%~0.15%` band near-miss 누적이 실제로 얼마나 있었는지 확인할 데이터가 없음
+
+#### `0.10%` 완화
+- **현 단계 비추천 / 판단 보류**
+- 이유: 0.12% 안보다 더 공격적인 조정인데, 이를 정당화할 near-miss 분포 근거가 아직 없음
+
+### 현재 시점 결론
+- **near-miss 누적이 실제로 있었다고 확인되지 않음**
+- **가장 많이 보인 패턴도 아직 말할 수 없음** — 표본 자체가 없음
+- **threshold 조정 판단은 아직 데이터 부족으로 보류가 맞음**
+- 따라서 다음 의사결정은 `threshold 변경` 이 아니라 **structured near-miss 데이터가 실제 저장되는지 먼저 1~3일 누적 확인**이 우선이다
+
+### 권장 후속 액션
+1. next run 부터 `run_history.json` 에 위 7개 필드가 실제 저장되는지 샘플 1~2건 즉시 확인
+2. 최소 1일 이상 누적 후 아래 4개 지표 재집계
+   - near-miss 총 건수
+   - category 분포
+   - trend_gap band 분포
+   - momentum 양수 비율
+3. 그 다음에만 `0.15% → 0.12%` 완화 검토
+4. `0.10%` 완화는 near-miss 가 충분히 누적된 뒤 후순위 검토
+
+---
+
 ## 15. trend_following BUY threshold 설계안 비교 (2026-04-12 12:10 UTC)
 
 ### 현재 BUY 조건 정리
