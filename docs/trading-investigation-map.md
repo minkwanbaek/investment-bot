@@ -209,6 +209,62 @@
 
 ---
 
+## 3b. near-miss observability 적재 경로 점검 (2026-04-12 14:xx UTC)
+
+### 확인 결과
+
+- `strategies/trend_following.py` 는 `trend_gap_pct`, `momentum_pct`, `buy_threshold_pct` 를 `signal.meta` 에 생성함
+- `services/trading_cycle.py` 는 hold 신호에 대해 `is_near_miss`, `category`, `stage`, `block_reason` 를 `signal.meta` 에 추가함
+- `dry_run_cycle`, `adapter_cycle`, `semi_live_cycle` 는 `result` 전체를 그대로 `run_history.record(..., payload=result)` 하므로 near-miss 메타가 **이미 저장됨**
+- **누락 지점은 `scripts/executor.py` 의 `executor_cycle` 기록 경로였음**
+  - 이전에는 `results_count` 와 `portfolio_after` 만 저장
+  - 실제 심볼/전략별 `results` 배열을 `run_history` 에 넣지 않아 near-miss 관측 데이터가 누적 파일에 남지 않았음
+
+### 보정 내용
+
+- `scripts/executor.py`
+  - `run_history.record("executor_cycle", payload=...)` 에 `results` 배열 추가
+  - 이제 `signal.meta.is_near_miss`, `category`, `stage`, `block_reason` 가 executor run_history JSONL 에도 그대로 남음
+- 테스트 추가
+  - `tests/test_near_miss_persistence.py`
+  - 검증 범위:
+    1. `TradingCycleService.run()` 에서 near-miss 메타 생성
+    2. `dry_run_cycle` 스타일 저장 시 run_history 에 메타 유지
+    3. `executor_cycle` 스타일 저장 payload 에 `results[*].signal.meta` 유지
+
+### deterministic 검증 케이스
+
+다음 8개 close 시계열을 사용해 threshold near-miss 를 재현:
+
+```python
+[100, 100, 100, 100, 100, 100.15, 100.18, 100.21]
+```
+
+이 케이스의 특징:
+- `trend_gap_pct` 는 buy threshold(0.15%) 바로 아래
+- `momentum_pct > 0`
+- 결과적으로 `trend_following` 에서 `hold` 이지만 near-miss 로 마킹됨
+- 현재 regime 판정상 `trend_strategy_route_blocked` 까지 붙어 `stage=route_filter` 로 저장됨
+
+### 기대 저장 형태 예시
+
+`run_history/YYYY-MM-DD.jsonl` 의 `executor_cycle.payload.results[0].signal.meta`:
+
+```json
+{
+  "trend_gap_pct": 0.001124,
+  "momentum_pct": 0.000299,
+  "buy_threshold_pct": 0.0015,
+  "trend_gap_to_threshold_pct": 0.7495,
+  "is_near_miss": true,
+  "category": "threshold",
+  "stage": "route_filter",
+  "block_reason": "trend_strategy_route_blocked"
+}
+```
+
+---
+
 ## 4. 파일/함수 기준 추적 포인트 표
 
 | 영역 | 파일/함수 | 역할 | 확인 상태 | 메모 |
