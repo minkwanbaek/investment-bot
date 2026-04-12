@@ -410,3 +410,96 @@
 - ✅ 문서 업데이트 완료: `docs/trading-investigation-map.md`
 - ✅ config/app.yml 수정 완료: `time_blacklist_filter_enabled: false`
 - ⏳ git commit 대기 (사용자 확인 후 실행)
+
+---
+
+## 11. BUY vs 현재 시장 조건 비교 분석 (2026-04-12 09:30 UTC)
+
+### 최근 BUY 사례 (3 건)
+
+| 심볼 | 시간 (UTC) | 가격 | short_ma | long_ma | trend_gap_pct | momentum_pct | 상태 |
+|------|-----------|------|----------|---------|---------------|--------------|------|
+| THETA/KRW | 08:22 | 251 | 249.33 | 248.88 | **0.18%** | > 0 | ✅ BUY |
+| WLD/KRW | 09:18 | 435 | 433.67 | 432.50 | **0.27%** | > 0 | ✅ BUY |
+| MANA/KRW | 06:49 | 132 | 131.67 | 131.25 | **0.32%** | > 0 | ✅ BUY |
+
+### 현재 시장 조건 (09:30 UTC)
+
+| 심볼 | 가격 | short_ma | long_ma | trend_gap_pct | momentum_pct | BUY 조건 | 부족분 |
+|------|------|----------|---------|---------------|--------------|----------|--------|
+| BTC/KRW | 106,769,000 | 106,789,667 | 106,810,750 | **-0.02%** | -0.06% | ❌ | trend_gap -0.17% |
+| ETH/KRW | 3,303,000 | 3,304,000 | 3,303,125 | **0.03%** | 0.00% | ❌ | trend_gap -0.12% |
+| THETA/KRW | 249 | 249.00 | 249.50 | **-0.20%** | 0.00% | ❌ | trend_gap -0.35% |
+
+### 비교 분석
+
+**BUY 가 났던 때:**
+- trend_gap: **0.18% ~ 0.32%** (임계값 0.15% 초과)
+- momentum: 항상 양수 (> 0)
+
+**현재:**
+- trend_gap: **-0.20% ~ +0.03%** (임계값 미달)
+- momentum: 0 에 수렴 또는 음수
+
+**부족분:**
+- trend_gap: **0.12% ~ 0.35%** 부족
+- momentum: 0 또는 음수
+
+### 가장 자주 깨지는 조건
+
+**`trend_gap_pct ≥ 0.15%`**
+
+- BUY 발생 시에는 항상 이 조건을 만족 (0.18% ~ 0.32%)
+- 현재는 모든 주요 심볼 (BTC, ETH, THETA) 이 이 조건을 만족하지 못함
+- momentum 조건 (momentum_pct > 0) 도 현재는 0 에 수렴하거나 음수
+
+### threshold 완화 필요성 판단
+
+**현재 threshold (0.15%) 유지 권장**
+
+근거:
+1. **0.15% 는 달성 가능한 수준** — 실제 BUY 사례 (THETA 0.18%, WLD 0.27%, MANA 0.32%) 에서 확인
+2. **문제는 threshold 가 아니라 시장 레짐** — 현재 시장이 횡보/하락 추세에 있어 trend_gap 자체가 음수 또는 0 에 가까움
+3. **threshold 완화 (0.15% → 0.10%) 시 false positive 증가 위험** — 더 많은 노이즈 신호 포착
+
+**권장 대응:**
+- threshold 유지
+- 시장 레짐이 uptrend 로 전환될 때까지 대기
+- 또는 mean_reversion/dca 전략의 BUY 조건 검토 (현재는 trend_following 만 주목)
+
+---
+
+## 12. 최종 요약 (2026-04-12 09:30 UTC)
+
+### BUY 0 건의 원인 (3 단계 규명)
+
+**1 단계 (과거 00-04 UTC):** `time_blacklist_filter` 에 의해 BUY 신호 차단
+- 설정: `risk_control.time_blacklist_filter_enabled: true`, `blocked_hours: [0,1,2,3,4]` (UTC)
+- 영향: 한국 시간 (KST) 09:00-13:00 에 BUY 신호 모두 거절
+- 근거: 2026-04-12 일차 run_history 에서 **186 건 `blocked_time_window`** 확인
+
+**2 단계 (현재 09:00+ UTC):** 시장 조건이 BUY 신호 생성 조건을 만족하지 않음
+- trend_following BUY 조건: `trend_gap_pct ≥ 0.15% AND momentum_pct > 0`
+- 마지막 BUY: 08:22 UTC (THETA/KRW)
+- 현재 (09:07 UTC): BUY 신호 0 건, SELL 만 발생 (below_min_order_notional 로 거절)
+
+**3 단계 (상세 비교 분석, 09:30 UTC):** BUY 시 vs 현재 — trend_gap 임계값 부족
+- **BUY 발생 시:** trend_gap **0.18% ~ 0.32%** (임계값 0.15% 초과)
+- **현재:** trend_gap **-0.20% ~ +0.03%** (임계값 미달)
+- **부족분:** 0.12% ~ 0.35%
+- **가장 자주 깨지는 조건:** `trend_gap_pct ≥ 0.15%`
+- momentum 은 BUY 시 항상 양수였으나, 현재는 0 에 수렴 또는 음수
+
+### threshold 완화 필요성 판단
+
+- 현재 0.15% 는 시장 변동성에 따라 충분히 달성 가능한 수준 (실제 BUY 사례 확인)
+- 문제는 **현재 시장이 횡보/하락 추세**에 있어 trend_gap 자체가 음수 또는 0 에 가까움
+- **threshold 완화 (0.15% → 0.10%)** 를 고려할 수 있으나, 이 경우 false positive 증가 위험
+- **권장:** threshold 유지, 대신 시장 레짐이 uptrend 로 전환될 때까지 대기
+
+### 문서/커밋 완료 여부
+
+- ✅ 문서 업데이트 완료: `docs/trading-investigation-map.md`
+- ✅ config/app.yml 수정 완료: `time_blacklist_filter_enabled: false`
+- ✅ BUY vs 현재 비교 분석 완료 (09:30 UTC)
+- ⏳ git commit 대기 (사용자 확인 후 실행)
