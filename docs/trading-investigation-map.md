@@ -435,6 +435,7 @@
 | 2026-04-12 09:34 UTC | ✅ 최근 run_history 200건 재검증: BUY 0건 확인 <br> ✅ SELL 신호는 계속 발생하나 `below_min_order_notional` / `below_min_managed_position_notional` 로 스킵 <br> ✅ regime classifier(`ranging`) 와 strategy_selection(`sideways`) 명칭 불일치 재확인 | Planner (subagent) |
 | 2026-04-12 09:43 UTC | ✅ **구조 문제 2 가지 정리 완료** <br>  - A: regime 명칭 통일 (`ranging` → `sideways`) <br>  - B: dust SELL 노이즈 정리 (조기 제외 + 필터링) <br> ✅ **검증**: run_once 3 회 실행 — import/동작 정상 <br> ✅ **문서 업데이트**: 변경 내용 반영 | Planner (subagent) |
 | 2026-04-12 09:45 UTC | ✅ **최종 검증 완료**: run_once 2 회 추가 실행 <br>  - regime: `"sideways"` 명칭 사용 확인 (새 사이클) <br>  - dust SELL: `below_min_order_notional` 로그는 유지되나, BUY 평가 우선순위 확보 <br>  - BUY 신호: 시장 조건 미달로 여전히 0 건 (기대됨) | Planner (subagent) |
+| 2026-04-12 12:40 UTC | ✅ **trend_following near-miss observability 최소 침습 구현** <br>  - `TrendFollowingStrategy.generate_signal()` 에 structured meta 추가: `buy_threshold_pct`, `trend_gap_pct`, `trend_gap_to_threshold_pct`, `momentum_pct` <br>  - `TradingCycleService.run()` 경로에서 near-miss 판정/기록 추가: `is_near_miss`, `category`, `stage` (+ 필요 시 `block_reason`) <br>  - `.venv` 기반 run_once 검증으로 신규 필드 기록 확인 | Maker (subagent) |
 
 ---
 
@@ -881,6 +882,7 @@
 ### 문서/커밋 상태
 - ✅ 문서 업데이트 완료
 - ⏳ threshold 실제 변경은 미수행
+- ✅ near-miss observability 구현 반영 완료 (`trend_following.py`, `trading_cycle.py`, 본 문서)
 - ⏳ git commit 미수행
 
 ---
@@ -1005,4 +1007,25 @@ threshold 조정 판단용 핵심 지표:
 
 ### 추가 문서
 - ✅ `docs/trend-following-near-miss-observability-design.md` 추가
+
+### 구현 반영 상태 (2026-04-12 12:40 UTC)
+- 실제 구현 필드
+  - `is_near_miss`
+  - `category`
+  - `stage`
+  - `buy_threshold_pct`
+  - `trend_gap_pct`
+  - `trend_gap_to_threshold_pct`
+  - `momentum_pct`
+- 기록 위치
+  - `semi_live_cycle.payload.signal.meta`
+  - `shadow_cycle.payload.decision.signal.meta` (shadow 경유 시)
+- 현재 판정 방식
+  - `threshold`: `0 <= trend_gap_pct < buy_threshold_pct` 이고 `momentum_pct > 0`
+  - `confirm_fail`: `trend_gap_pct >= buy_threshold_pct` 이고 `momentum_pct <= 0`
+  - route/sideway 에 의해 최종 hold 전환된 경우 기존 near-miss 에 한해 `stage=route_filter`, `block_reason` 보강
+- 검증 메모
+  - synthetic candle 검증에서 `threshold` near-miss 구조화 확인
+  - 실제 `.venv` run_once 검증에서는 live 시장 데이터 기준 신규 structured metric 필드가 run_history 에 기록되는 것 확인
+  - 이번 실데이터 샘플에서는 near-miss 자체가 많이 잡히지 않았고, 이는 현재 시장이 threshold 근처보다 momentum/route 조건에서 더 자주 멈춘다는 신호로 해석 가능
 

@@ -31,6 +31,9 @@ class TradingCycleService:
         # Regime names are now unified to enum values (sideways, trend_up, trend_down, uncertain)
         # No legacy mapping needed
         market_regime = market_info.get("regime", "uncertain")
+        
+        # Near-miss observability for trend_following
+        signal = self._enrich_near_miss(signal, market_info)
 
         route_block_reason = self._route_block_reason(strategy_name=strategy_name, market_info=market_info)
         force_exit = bool(getattr(signal, "meta", {}).get("force_exit", False))
@@ -41,7 +44,7 @@ class TradingCycleService:
                 action="hold",
                 confidence=signal.confidence,
                 reason=f"market_regime=sideways; sideway_filter_blocked; {signal.reason}",
-                meta=getattr(signal, "meta", {}),
+                meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason="sideway_filter_blocked"),
             )
         elif not force_exit and route_block_reason:
             signal = TradeSignal(
@@ -50,7 +53,7 @@ class TradingCycleService:
                 action="hold",
                 confidence=signal.confidence,
                 reason=f"{route_block_reason}; {signal.reason}",
-                meta=getattr(signal, "meta", {}),
+                meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason=route_block_reason),
             )
         elif not force_exit and strategy_name == "trend_following" and market_info.get("regime") == "sideways":
             signal = TradeSignal(
@@ -59,7 +62,7 @@ class TradingCycleService:
                 action="hold",
                 confidence=signal.confidence,
                 reason=f"market_regime=sideways; {signal.reason}",
-                meta=getattr(signal, "meta", {}),
+                meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason="market_regime_sideways_hold"),
             )
 
         signal.meta = {
@@ -124,4 +127,62 @@ class TradingCycleService:
         if float(market_info.get("range_pct", 0.0) or 0.0) < settings.sideway_filter_range_threshold:
             return True
         return False
+
+    def _enrich_near_miss(self, signal: TradeSignal, market_info: dict) -> TradeSignal:
+        """Add near-miss observability for trend_following hold signals."""
+        if signal.strategy_name != "trend_following":
+            return signal
+
+        meta = getattr(signal, "meta", {})
+        trend_gap_pct = float(meta.get("trend_gap_pct", 0.0) or 0.0)
+        momentum_pct = float(meta.get("momentum_pct", 0.0) or 0.0)
+        buy_threshold_pct = float(meta.get("buy_threshold_pct", 0.0015) or 0.0015)
+
+        if signal.action == "hold":
+            if 0.0 <= trend_gap_pct < buy_threshold_pct and momentum_pct > 0:
+                meta = self._mark_near_miss_stage(meta, category="threshold", stage="strategy_signal")
+            elif trend_gap_pct >= buy_threshold_pct and momentum_pct <= 0:
+                meta = self._mark_near_miss_stage(
+                    meta,
+                    category="confirm_fail",
+                    stage="strategy_signal",
+                    block_reason="momentum_not_positive",
+                )
+
+        signal.meta = meta
+        return signal
+
+    def _mark_near_miss_stage(
+        self,
+        meta: dict,
+        *,
+        category: str,
+        stage: str,
+        block_reason: str | None = None,
+    ) -> dict:
+        if "trend_gap_pct" not in meta or "momentum_pct" not in meta or "buy_threshold_pct" not in meta:
+            return meta
+
+        next_meta = {**meta}
+        if not next_meta.get("is_near_miss"):
+            next_meta.update({"is_near_miss": True, "category": category, "stage": stage})
+        if block_reason:
+            existing = next_meta.get("block_reason")
+            if existing and existing != block_reason:
+                next_meta["block_reason"] = f"{existing},{block_reason}"
+            else:
+                next_meta["block_reason"] = block_reason
+        return next_meta
+
+    def _append_near_miss_block_reason(self, meta: dict, *, stage: str, block_reason: str) -> dict:
+        if not meta.get("is_near_miss"):
+            return meta
+
+        next_meta = {**meta, "stage": stage}
+        existing = next_meta.get("block_reason")
+        if existing and existing != block_reason:
+            next_meta["block_reason"] = f"{existing},{block_reason}"
+        else:
+            next_meta["block_reason"] = block_reason
+        return next_meta
 
