@@ -1151,3 +1151,101 @@ threshold 조정 판단용 핵심 지표:
   - 실제 `.venv` run_once 검증에서는 live 시장 데이터 기준 신규 structured metric 필드가 run_history 에 기록되는 것 확인
   - 이번 실데이터 샘플에서는 near-miss 자체가 많이 잡히지 않았고, 이는 현재 시장이 threshold 근처보다 momentum/route 조건에서 더 자주 멈춘다는 신호로 해석 가능
 
+---
+
+## ✅ Near-miss 관찰 결과 및 threshold 판단 (2026-04-12 14:52 UTC)
+
+### 관찰 개요
+- **관찰 기간:** 2026-04-12 00:00 ~ 14:52 UTC
+- **총 near-miss 건수:** 76 건
+- **관찰 방법:** run_history.jsonl 분석 + executor_cycle 3 회 추가 실행
+
+### 누적 통계
+
+#### 1. Category 분포
+- **threshold:** 50 건 (65.8%) — trend_gap 이 threshold 미만이지만 route_filter 로 차단
+- **confirm_fail:** 26 건 (34.2%) — trend_gap 이 threshold 이상이거나 momentum <= 0
+
+#### 2. Stage 분포
+- **route_filter:** 76 건 (100.0%) — **전부 route_filter 병목**
+
+#### 3. Trend gap band 분포
+- **<0.10%:** 45 건 (59.2%)
+- **0.10-0.12%:** 6 건 (7.9%)
+- **0.12-0.15%:** 2 건 (2.6%)
+- **>=0.15%:** 23 건 (30.3%)
+
+→ **0.10~0.15% 구간 합계: 8 건 (10.5%)**
+
+#### 4. 주요 병목 지표
+- **Momentum fail (momentum <= 0):** 26 건 (34.2%)
+- **Route filter 병목:** 76 건 (100.0%)
+- **Confirm fail (regime/momentum 문제):** 26 건 (34.2%)
+
+#### 5. Top 심볼 (near-miss 다발)
+1. XLM/KRW: 16 회
+2. HBAR/KRW: 14 회
+3. TRX/KRW: 12 회
+4. ETH/KRW: 11 회
+5. BTC/KRW: 10 회
+
+### 가장 많이 나온 패턴
+
+```
+Category: threshold, Stage: route_filter
+block_reason: "trend_strategy_route_blocked"
+trend_gap: 0.04~0.07%, momentum: 0.07~0.21%
+```
+
+→ **대부분 trend_gap 은 threshold(0.15%) 에 한참 미치지 못하지만, momentum 은 양수인 경우 많음**
+
+→ **문제는 trend_gap 이 아니라 route_filter(sideways regime) 에 의해 차단됨**
+
+### 판단: threshold 유지 vs 0.12% 완화
+
+**결론: 현행 유지 (0.15%)**
+
+근거:
+1. **0.10~0.15% 구간 비중이 10.5% 로 낮음**
+   - 0.12% 로 완화해도 추가 진입할 수 있는 샘플이 8 건에 불과
+   - 이마저도 route_filter 병목이면 진입 불가
+
+2. **Route filter 병목이 100%**
+   - near-miss 전부가 route_filter 에 의해 차단됨
+   - threshold 문제보다 **시장 레짐 (sideways) 문제**가 더 근본 원인
+
+3. **Momentum 양수 비중은 65.8% 로 높지만**
+   - route_filter 가 우선 차단하므로 momentum 의미가 없음
+   - sideways regime 에서 mean_reversion 전략만 허용되는 구조
+
+4. **Confirm fail 34.2% 는 regime 문제**
+   - trend_gap 이 threshold 를 넘거나 momentum 이 음수
+   - 이 경우 threshold 완화와 무관
+
+### 후속 조치 제안
+
+1. **Route filter 완화 검토** (threshold 보다 우선)
+   - `sideways` regime 에서도 trend_following 일부 허용
+   - 예: `volatility_state=low` 일 때는 trend_following 예외 허용
+
+2. **Threshold 는 현행 유지**
+   - 0.15% 유지
+   - 추가 데이터 누적 후 재검토 (최소 3 일 이상)
+
+3. **Near-miss 지속 관측**
+   - 일별 near-miss 집계 자동화
+   - 0.10~0.15% 구간 비중이 20% 이상으로 증가하면 완화 검토
+
+### 문서/커밋 완료 여부
+- ✅ 문서 업데이트: `docs/trading-investigation-map.md` (본 섹션 추가)
+- ✅ Git commit 준비 완료
+- ❌ threshold 값 변경: **없음** (현행 유지)
+
+---
+
+## Next Steps
+
+1. **Route filter 완화 방안 검토** (우선순위 높음)
+2. **Near-miss 일별 집계 자동화** (운영 개선)
+3. **3 일 이상 데이터 누적 후 threshold 재검토** (중기)
+
