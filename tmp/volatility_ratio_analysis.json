@@ -1,0 +1,13 @@
+{
+  "total_signals": 5493,
+  "volatility_state_distribution": {
+    "low": 5493
+  },
+  "interpretation": "All signals have volatility_ratio < 0.005, indicating extremely low volatility market regime",
+  "bottleneck_analysis": {
+    "exception_pass_candidates": 77,
+    "blocked_by_volatility_low": 77,
+    "percentage_blocked": 100.0
+  },
+  "recommendation": "Consider enabling breakout_exception_allow_low_volatility or adjusting volatility thresholds for current market regime"
+}

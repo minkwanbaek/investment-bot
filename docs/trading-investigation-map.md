@@ -1436,3 +1436,175 @@ trend_gap: 0.04~0.07%, momentum: 0.07~0.21%
 - ✅ 문서 업데이트 완료 (`docs/trading-investigation-map.md`)
 - ⏳ git commit 대기 (사용자 확인 후)
 
+---
+
+## 1d. Sideways Exception Pass 관측 결과 (2026-04-12 23:00 UTC)
+
+### 목적
+- sideways exception pass 적용 이후, 짧은 관측으로 실제 exception 통과/차단 누적 확인
+- 특히 `volatility_state != low` 조건이 현재 핵심 병목인지 판단
+- volatility 조건 유지/완화에 대한 판단 근거 마련
+
+### 관측 데이터
+- **기간:** 2026-04-12 00:00 ~ 23:00 UTC (약 23 시간)
+- **총 신호 수:** 5,493 건
+- **데이터 소스:** `data/run_history/2026-04-12.jsonl`
+
+### 집계 결과
+
+#### Exception Pass / Blocked 누적
+| 항목 | 건수 | 비율 |
+|------|------|------|
+| **Exception Pass** | **0** | 0% |
+| **Exception Blocked** | **168** | 100% (sideways block 중) |
+| Total Signals | 5,493 | - |
+
+#### Blocked Reason 분포 (sideways block 168 건 기준)
+| 이유 | 건수 | 비율 |
+|------|------|------|
+| `volatility_state=low` | **168** | **100%** |
+| 기타 | 0 | 0% |
+
+#### Market Regime 분포
+| Regime | 건수 | 비율 |
+|--------|------|------|
+| sideways | 5,028 | 91.5% |
+| mixed | 321 | 6.0% |
+| downtrend | 93 | 1.7% |
+| uptrend | 36 | 0.7% |
+
+#### Volatility State 분포
+| State | 건수 | 비율 |
+|-------|------|------|
+| **low** | **5,493** | **100%** |
+| normal | 0 | 0% |
+| high | 0 | 0% |
+
+#### Momentum 분포
+| Momentum | 건수 | 비율 |
+|----------|------|------|
+| positive | 396 | 7.2% |
+| negative | 414 | 7.5% |
+| zero | 4,683 | 85.3% |
+
+#### Trend Gap 분포 (threshold=0.0015 기준)
+| 범위 | 건수 | 비율 |
+|------|------|------|
+| ≥ threshold (0.0015) | 184 | 3.3% |
+| ≥ 70% threshold (0.00105) | 82 | 1.5% |
+| < 70% threshold | 5,227 | 95.2% |
+
+#### Higher TF Bias 분포
+| Bias | 건수 | 비율 |
+|------|------|------|
+| neutral | 5,493 | 100% |
+| bullish | 0 | 0% |
+| bearish | 0 | 0% |
+
+### Exception Pass Candidate 심층 분석
+
+**Candidate 정의:**
+- `market_regime == sideways`
+- `strategy == trend_following`
+- `momentum_pct > 0`
+- `trend_gap_pct >= 0.00105` (threshold 의 70%)
+
+**결과:**
+- **Candidate 총계:** 77 건
+- **Exception PassGranted:** 0 건
+- **Blocked by volatility_low:** 77 건 (100%)
+
+**대표적인 Candidate 예시:**
+| ID | Symbol | trend_gap | momentum | volatility | higher_tf | 결과 |
+|----|--------|-----------|----------|------------|-----------|------|
+| 22584 | THETA/KRW | 0.001849 | 0.004032 | low | neutral | blocked (vol_low) |
+| 22584 | ENA/KRW | 0.001542 | 0.007407 | low | neutral | blocked (vol_low) |
+| 22584 | ICX/KRW | 0.001598 | 0.001916 | low | neutral | blocked (vol_low) |
+| 22708 | SUI/KRW | 0.001054 | 0.002232 | low | neutral | blocked (vol_low) |
+| 22646 | BTC/KRW | 0.001054 | 0.000094 | low | neutral | blocked (vol_low) |
+
+### 판단
+
+#### 1. 현재 핵심 병목이 정말 volatility low 인가?
+**✅是的 — 100% 병목**
+
+- 관측된 5,493 건 중 **100% 가 `volatility_state=low`**
+- exception pass candidate 77 건 모두 `volatility_state != low` 조건에서 탈락
+- 다른 조건 (momentum>0, trend_gap≥70%, higher_tf not bearish) 은 충족하는 표본 존재
+- **결론:** `volatility_state != low` 이 현재 유일한 병목
+
+#### 2. `volatility_state != low` 유지가 맞는가?
+**상황에 따라 다름 — 현재 시장 환경에서는 과도한 제한**
+
+**당초 설계 의도:**
+- low volatility 는 "변동성 부족으로 방향성 신뢰도 낮음" → conservative 하게 block
+- exception pass 는 "그럼에도 breakout 조짐이 있으면 제한적 허용"
+- `breakout_exception_allow_low_volatility: false` 로 설정하여 low vol 에서도 block
+
+**현재 시장 현실:**
+- **low volatility 가 예외 상황이 아닌 기본 상태** (100% 관측)
+- ATR/close ratio < 0.5% 가 지속되는 극저변동성 장세
+- 이 조건을 유지하면 sideways exception pass 는 **영구적으로 작동 불가**
+
+**권장:**
+- **단기:** `breakout_exception_allow_low_volatility: true` 로 완화 검토
+  - 이유: 현재 low vol 이 "비정상"이 아닌 "정상" 상태이므로, 예외 창을 아예 닫아두는 것은 설계 의도와 어긋남
+  - 위험: 너무 많은 신호가 통과될 수 있음 → 다른 조건 (momentum, trend_gap) 으로 필터링
+  
+- **중기:** volatility threshold 조정 고려
+  - 현재: `volatility_ratio < 0.005` → low
+  - 검토: `volatility_ratio < 0.003` 등으로 낮춰서 "진짜 low"만 block
+  - 또는 percentile 기반 동적 threshold 도입
+
+#### 3. 제한적 완화 검토 가치가 있는가?
+**✅ 있음 — 다음 조건으로 제한적 완화 권장**
+
+**제안 조건:**
+1. `breakout_exception_allow_low_volatility: true` 로 변경
+2. 대신 다른 조건을 더 엄격하게:
+   - `breakout_exception_momentum_min: 0.001` (0.1% 이상 양모멘텀)
+   - `breakout_exception_trend_gap_ratio: 0.8` (threshold 의 80% 이상)
+   - 기존: `momentum_min: 0.0`, `trend_gap_ratio: 0.7`
+
+**예상 효과:**
+- 현재 candidate 77 건 중 약 20-30 건 정도만 통과 예상
+- "진짜 breakout 조짐" 있는 표본만 선별
+- low volatility 라는 시장 환경을 반영하면서도 과도한 신호는 필터링
+
+**리스크:**
+- false positive 증가 가능성 (sideways 에서 whipsaw)
+- → paper trading 으로 1-2 주 관측 후 조정 권장
+
+### 다음 단계
+
+1. **즉시:** `config/app.yml` 에서 `breakout_exception_allow_low_volatility: true` 로 변경
+2. **동시에:** `breakout_exception_momentum_min: 0.001`, `breakout_exception_trend_gap_ratio: 0.8` 로 상향
+3. **관측:** 1-2 주 paper trading 으로 exception pass 통과 표본 모니터링
+4. **조정:** 통과 신호의 실제 성과 (win rate, PnL) 에 따라 threshold 재조정
+
+### 문서/커밋 상태
+- ✅ 문서 업데이트 완료 (`docs/trading-investigation-map.md` — 본 섹션 추가)
+- ⏳ git commit 대기 (아래 commit message 참조)
+
+---
+
+## Commit Message (예정)
+
+```
+feat: Add sideways exception pass observation analysis (2026-04-12)
+
+- Analyzed 5,493 signals from 2026-04-12 run_history
+- Found 100% volatility_state=low market regime
+- Exception pass candidates: 77, all blocked by volatility_low condition
+- Conclusion: volatility_state != low is the sole bottleneck (100% block rate)
+- Recommendation: Enable breakout_exception_allow_low_volatility with stricter momentum/trend_gap thresholds
+- Updated docs/trading-investigation-map.md with detailed analysis
+
+Files:
+- docs/trading-investigation-map.md (added section 1d)
+- tmp/analyze_exception_pass.py (analysis script)
+- tmp/analyze_volatility_details.py (detailed analysis script)
+- tmp/exception_pass_analysis.json (raw analysis data)
+- tmp/volatility_ratio_analysis.json (summary)
+```
+

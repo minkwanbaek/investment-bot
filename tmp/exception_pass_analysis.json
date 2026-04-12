@@ -1,0 +1,20 @@
+{
+  "exception_pass": 0,
+  "exception_blocked": 168,
+  "blocked_reasons": {
+    "other": 5199,
+    "sideways": 168
+  },
+  "volatility_state_low_blocked": 168,
+  "total_signals": 5367,
+  "volatility_states": {
+    "low": 5367
+  },
+  "market_regimes": {
+    "sideways": 4917,
+    "mixed": 321,
+    "downtrend": 93,
+    "uptrend": 36
+  },
+  "exception_details": []
+}
