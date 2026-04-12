@@ -539,7 +539,84 @@
 
 ---
 
-## 12. 최종 요약 (2026-04-12 09:30 UTC)
+## 12. 다른 활성 전략(mean_reversion, dca) 검증 결과 (2026-04-12 10:10 UTC)
+
+### 확인된 사실
+
+#### 1) 활성 상태와 실제 평가 경로
+- `config/app.yml` 기준 세 전략 모두 활성화 상태
+  - `trend_following.enabled: true`
+  - `mean_reversion.enabled: true`
+  - `dca.enabled: true`
+- 실제 실행 경로에서도 세 전략은 모두 평가됨
+  - `AutoTradeService._collect_symbol_candidates()` 가 각 심볼마다 `list_enabled_strategies()` 순회
+  - 각 전략별로 `shadow_service.run_once()` → `TradingCycleService.run()` 호출
+- 즉, **mean_reversion/dca 가 비활성이라서 BUY 가 안 나는 상태는 아님**
+
+#### 2) mean_reversion BUY 가능성
+- 전체 run_history 기준 `mean_reversion` 의 semi_live_cycle 는 **2603건** 확인
+- 이 중 BUY 신호는 **0건**
+- 최근 reason 예시:
+  - `deviation=-0.0001, momentum_pct=0.0007`
+  - `deviation=-0.0038, momentum_pct=0.0008`
+  - `deviation=0.0093, momentum_pct=0.0113`
+- 전략 조건:
+  - BUY = `deviation <= -0.03` **그리고** `momentum_pct >= 0`
+- 최근 시장에서는 deviation 이 대체로 **-0.4% ~ +1.9% 수준**으로, BUY 임계값인 **-3%** 에 크게 못 미침
+- 결론: **현재 mean_reversion 은 사실상 BUY 후보를 만들지 못함**
+
+#### 3) dca BUY 가능성
+- 전체 run_history 기준 `dca` 의 semi_live_cycle 는 **2605건** 확인
+- 이 중 BUY 신호는 **6건** 존재
+- BUY 사례:
+  - `2026-03-24T14:50:54Z` SOL/KRW `value_dca drawdown_pct=-0.0234`
+  - `2026-03-27T11:52:37Z` ETH/KRW `value_dca drawdown_pct=-0.0205`
+  - `2026-03-27T11:59:57Z` ETH/KRW `value_dca drawdown_pct=-0.0208`
+  - `2026-03-27T12:29:25Z` ETH/KRW `value_dca drawdown_pct=-0.0204`
+  - `2026-03-27T12:36:46Z` ETH/KRW `value_dca drawdown_pct=-0.0201`
+  - `2026-03-27T12:51:28Z` ETH/KRW `value_dca drawdown_pct=-0.0204`
+- 위 BUY 들은 모두 `review.approved=True`, `target_notional` 도 5000KRW 이상으로 확인됨
+- 하지만 **auto_trade 최종 chosen 후보로 dca 가 선택된 기록은 없음**
+- 최근 시장 reason 예시:
+  - `no_dca_window drawdown_pct=-0.0001`
+  - `no_dca_window drawdown_pct=-0.0031`
+  - `no_dca_window drawdown_pct=0.0084`
+- 전략 조건:
+  - BUY = `drawdown_pct <= -0.02`
+- 최근 시장은 대체로 **-0.3% ~ +1.9% 수준**이라, DCA 진입 조건인 **-2% 급락**이 거의 없음
+- 결론: **dca 는 구조적으로 BUY 가능성은 있으나, 현재 시장에서는 거의 창이 열리지 않음**
+
+#### 4) 전략 선택/라우팅 병목
+- `StrategySelectionService.choose()` 는 후보를 score 순으로 고르기 전에, 심볼+레짐 기준 허용 전략만 남김
+- 그러나 최근 병목의 핵심은 “라우팅이 다른 전략 기회를 먹는다”기보다, **다른 전략이 actionable BUY 자체를 거의 못 만든다**는 점임
+- 더 구체적으로:
+  - `mean_reversion`: BUY 0건 → 선택 단계까지 갈 후보가 없음
+  - `dca`: BUY 6건은 있었지만, 최근 구간에서는 BUY 0건 → 현재 시장에서는 선택 단계까지 올라올 후보가 거의 없음
+  - `trend_following`: 최근 최종 chosen 은 전부 trend_following
+- 따라서 현재 병목은 **selection bias 자체보다 전략별 진입 threshold와 시장 상태의 미스매치**에 가까움
+
+#### 5) 현재 시장 기준 현실성 비교
+- `trend_following`: 현재도 BUY 후보를 가장 자주 만듦. 다만 최종 실행은 `meaningful_order_notional / total_exposure_limit` 에서 막히는 케이스가 최근 기록에 존재
+- `mean_reversion`: 현재 시장에서 가장 비현실적. -3% deviation 조건이 너무 멀다
+- `dca`: mean_reversion 보다는 현실적이지만, 그래도 최근 drawdown 이 -2% 에 못 미쳐 현재 즉시 대안으로 보긴 어려움
+
+### 해석
+- **대안 전략 부재가 맞다.** trend_following 외 전략이 켜져 있어도, 현재 시장에서는 mean_reversion 은 사실상 죽어 있고 dca 도 드물게만 열린다.
+- **전략 선택 구조가 주병목은 아니다.** 세 전략은 실제로 다 평가되지만, mean_reversion/dca 가 최근 actionable BUY 를 거의 못 만든다.
+- 따라서 “왜 아직도 BUY 가 안 나오는가?”를 더 좁히면,
+  1. trend_following 이 만든 BUY 는 실행단(`meaningful_order_notional`, `max_total_exposure`)에서 막히고,
+  2. 다른 전략들은 현재 시장에서 대체 BUY 후보를 거의 공급하지 못한다.
+
+### 제안
+- 가장 합리적인 다음 액션은 **mean_reversion 완화보다 dca/실행단 조정 우선**
+  1. **실행단 조정 우선 검토**: `auto_trade_meaningful_order_notional`, `max_total_exposure_pct` 때문에 trend_following BUY 가 죽는지 먼저 손볼 가치가 큼
+  2. **dca threshold 소폭 완화 검토**: `-2.0% → -1.5%` 수준은 실험 가치가 있음
+  3. **mean_reversion 은 마지막 순위**: `-3%` 는 현재 시장에 너무 멀어, 이걸 건드리면 전략 성격 자체가 바뀔 가능성이 큼
+  4. **관측성 개선**: final chosen 이전에 `strategy candidates by symbol/regime` 로그를 남기면, selection 단계 병목 여부를 더 빨리 볼 수 있음
+
+---
+
+## 13. 최종 요약 (2026-04-12 10:10 UTC)
 
 ### BUY 0 건의 원인 (3 단계 규명)
 
