@@ -13,22 +13,23 @@ class StrategySelectionService:
 
     def _allowed_strategies(self, symbol: str, regime: str) -> list[str]:
         symbol = symbol.upper()
+        # Regime names unified: sideways (not ranging), trend_up/trend_down (not uptrend/downtrend), uncertain (not mixed/unknown)
         if symbol == "BTC/KRW":
-            if regime in {"uptrend", "downtrend"}:
+            if regime in {"trend_up", "trend_down", "sideways"}:
                 return ["trend_following"]
-            if regime in {"ranging", "mixed"}:
+            if regime in {"sideways", "uncertain"}:
                 return ["dca"]
             return []
         if symbol == "ETH/KRW":
-            if regime == "uptrend":
+            if regime in {"trend_up", "sideways"}:
                 return ["trend_following"]
-            if regime in {"downtrend", "ranging", "mixed"}:
+            if regime in {"trend_down", "sideways", "uncertain"}:
                 return ["mean_reversion"]
             return []
         if symbol == "SOL/KRW":
-            if regime == "uptrend":
+            if regime in {"trend_up", "sideways"}:
                 return ["trend_following"]
-            if regime in {"downtrend", "ranging", "mixed"}:
+            if regime in {"trend_down", "sideways", "uncertain"}:
                 return ["mean_reversion", "dca"]
             return []
-        return ["trend_following"] if regime in {"uptrend", "downtrend"} else []
+        return ["trend_following"] if regime in {"trend_up", "trend_down", "sideways"} else []

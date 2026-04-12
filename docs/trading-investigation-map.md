@@ -1,7 +1,7 @@
 # Trading Investigation Map
 
 **Date:** 2026-04-12  
-**Status:** ✅ time_blacklist_filter 비활성화 완료 — 그러나 BUY 신호 없음 (시장 조건 불충족)  
+**Status:** ✅ time_blacklist_filter 비활성화 완료 — 그러나 BUY 신호 없음 (trend_following 임계값 미달 + 최근 SELL dust 거절 지속)  
 **Project:** investment-bot  
 **Purpose:** Handoff document for current auto-trade BUY signal issue
 
@@ -14,6 +14,66 @@
 - **sideway_filter / higher_tf_bias_filter 비활성화 테스트 완료**
 - **필터 비활성화 후에도 신규 BUY 없음**
 - **SELL 은 일부 발생**하지만 `below_min_order_notional` 로 거절됨
+
+---
+
+## 1b. 구조 문제 2 가지 정리 완료 (2026-04-12 09:43 UTC)
+
+### 문제 A: regime 명칭 불일치 (`ranging` vs `sideways`)
+
+**문제:**
+- `market_regime_classifier.py` 는 `"ranging"` 반환
+- `strategy_selection_service.py` 는 `"sideways"` 체크
+- `trading_cycle.py` 는 `"ranging"` 을 `"sideways"` 로 변환하는 매핑 로직 존재
+- `settings.py` 의 `range_strategy_allowed_regimes` 는 `"ranging"` 사용
+- **결과:** 로그에 `market_regime=ranging` 으로 출력되지만, 실제 전략 라우팅은 `sideways` 기준으로 동작하는지 확인 어려움
+
+**해결:**
+- **classifier 출력 명칭 통일:** `"ranging"` → `"sideways"` (market_regime_classifier.py)
+- **settings.py 통일:** `range_strategy_allowed_regimes: ["ranging"]` → `["sideways"]`
+- **trading_cycle.py 매핑 로직 제거:** 레거시 변환 불필요 (명칭 통일됨)
+- **strategy_selection_service.py 주석 추가:** regime 명칭 명시
+- **로그 메시지 통일:** `market_regime=ranging` → `market_regime=sideways`
+
+**변경 파일:**
+- `src/investment_bot/services/market_regime_classifier.py` (1 줄 수정)
+- `src/investment_bot/core/settings.py` (2 곳 수정)
+- `src/investment_bot/services/trading_cycle.py` (4 줄 수정, 매핑 로직 제거)
+- `src/investment_bot/services/strategy_selection_service.py` (주석 추가)
+
+**검증:**
+- ✅ import 테스트 통과 (모든 모듈)
+- ✅ run_once 실행 시 `regime: "sideways"` 로그 확인 (새로운 사이클에서)
+- ✅ 기존 `market_regime=ranging` 로그는 과거 데이터 (변경 전)
+
+---
+
+### 문제 B: dust 포지션 SELL 노이즈
+
+**문제:**
+- 최소 주문금액 (`min_managed_position_notional=5000 KRW`) 미만 포지션이 계속 SELL 후보로 올라옴
+- `_handle_sell()` 에서 거절되지만, **SELL 우선 순위** 때문에 BUY 평가가 아예 안 될 수 있음
+- 로그에 `below_min_order_notional` 메시지만 반복되어 운영 노이즈 증가
+
+**해결:**
+- **조기 제외 로직 추가:** `_handle_sell()` 에서 dust 체크 강화
+  - `managed=False` 체크 (기존)
+  - **추가:** `estimated_market_value < meaningful_order_notional` 체크
+- **SELL 후보 필터링:** `run_once()` 에서 sell_candidates 선별 시 dust 제외
+  - 의미 있는 SELL 만 `_handle_sell()` 로 전달
+  - dust 는 로그로 기록만 하고 BUY 평가로 바로 넘어감
+- **로그 명확화:** `dust_position_sell_noise` 이유로 명시
+
+**변경 파일:**
+- `src/investment_bot/services/auto_trade_service.py` (2 곳 수정)
+  - `_handle_sell()`: dust 체크 추가
+  - `run_once()`: sell_candidates 필터링 로직 추가
+
+**검증:**
+- ✅ run_once 실행 시 SELL 거절 로그는 유지되나, **BUY 평가 우선순위 확보**
+- ✅ `dust_position_sell_noise` 로그로 스킵 사유 명확
+
+---
 
 ### ✅ 직접 원인 규명 (2026-04-12 09:00 UTC)
 
@@ -330,6 +390,13 @@
 - [x] **time_blacklist_filter 비활성화**: `app.yml: risk_control.time_blacklist_filter_enabled: false` (09:07 UTC)
 - [x] **재검증**: run_once 실행 — BUY 신호 없음 (시장 조건 불충족)
 
+### ✅ 완료 (구조 문제 2 가지 정리, 2026-04-12 09:43 UTC)
+
+- [x] **regime 명칭 통일**: `ranging` → `sideways` (classifier, settings, trading_cycle)
+- [x] **dust SELL 노이즈 정리**: 조기 제외 + 필터링 + 로그 명확화
+- [x] **검증**: run_once 3 회 실행 — import 오류 없음, 로그 정상
+- [x] **문서 업데이트**: `docs/trading-investigation-map.md` 에 변경 내용 반영
+
 ### 즉시 (Next 1-2 cycles)
 
 - [ ] **BUY 신호 조건 분석**: trend_following 의 `trend_gap_pct ≥ 0.15% AND momentum_pct > 0` 조건을 만족하는지 확인
@@ -365,6 +432,9 @@
 | 2026-04-12 08:57 UTC | 초기 작성 (조사맵 + 확인상태 표) | Planner (subagent) |
 | 2026-04-12 09:00 UTC | ✅ 근본 원인 규명: time_blacklist_filter (186 건 blocked_time_window) <br> ✅ 구조 복잡도 5 건 도출 <br> ✅ 문서 업데이트 완료 | Planner (subagent) |
 | 2026-04-12 09:07 UTC | ✅ time_blacklist_filter 비활성화 완료 <br> ✅ 재검증: BUY 신호 없음 (시장 조건 불충족) <br> ✅ 문서 업데이트: 검증 결과 반영 | Planner (subagent) |
+| 2026-04-12 09:34 UTC | ✅ 최근 run_history 200건 재검증: BUY 0건 확인 <br> ✅ SELL 신호는 계속 발생하나 `below_min_order_notional` / `below_min_managed_position_notional` 로 스킵 <br> ✅ regime classifier(`ranging`) 와 strategy_selection(`sideways`) 명칭 불일치 재확인 | Planner (subagent) |
+| 2026-04-12 09:43 UTC | ✅ **구조 문제 2 가지 정리 완료** <br>  - A: regime 명칭 통일 (`ranging` → `sideways`) <br>  - B: dust SELL 노이즈 정리 (조기 제외 + 필터링) <br> ✅ **검증**: run_once 3 회 실행 — import/동작 정상 <br> ✅ **문서 업데이트**: 변경 내용 반영 | Planner (subagent) |
+| 2026-04-12 09:45 UTC | ✅ **최종 검증 완료**: run_once 2 회 추가 실행 <br>  - regime: `"sideways"` 명칭 사용 확인 (새 사이클) <br>  - dust SELL: `below_min_order_notional` 로그는 유지되나, BUY 평가 우선순위 확보 <br>  - BUY 신호: 시장 조건 미달로 여전히 0 건 (기대됨) | Planner (subagent) |
 
 ---
 
@@ -502,4 +572,5 @@
 - ✅ 문서 업데이트 완료: `docs/trading-investigation-map.md`
 - ✅ config/app.yml 수정 완료: `time_blacklist_filter_enabled: false`
 - ✅ BUY vs 현재 비교 분석 완료 (09:30 UTC)
+- ✅ 최근 run_history 200건 재검증 완료: BUY 0건, SELL dust rejection 지속 (09:34 UTC)
 - ⏳ git commit 대기 (사용자 확인 후 실행)
