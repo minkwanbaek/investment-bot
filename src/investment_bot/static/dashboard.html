@@ -2,60 +2,73 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Trading Bot Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>투자봇 대시보드</title>
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260329a" />
   </head>
   <body>
-    <div class="page">
-      <header class="hero">
-        <div>
-          <p class="eyebrow">TRADING BOT</p>
-          <h1>운영 대시보드</h1>
-          <p class="sub">현재 봇이 무엇을 하고 있는지 실시간으로 보여주는 운영 콘솔</p>
-        </div>
-        <div class="hero-meta">
-          <div>Auto refresh <strong id="refresh-interval">3s</strong></div>
-          <div>Last updated <strong id="last-updated">-</strong></div>
-        </div>
-      </header>
+    <div class="page-shell">
+      <div class="page">
+        <header class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">INVESTMENT BOT</p>
+            <h1>투자봇 상태</h1>
+            <p class="sub">최근 매수/매도와 판단 근거만 표시합니다.</p>
+          </div>
+          <div class="hero-actions">
+            <div class="hero-meta-card">
+              <span class="meta-label">마지막 갱신</span>
+              <strong id="last-updated">-</strong>
+            </div>
+          </div>
+        </header>
 
-      <section class="cards" id="summary-cards"></section>
+        <section class="cards" id="summary-cards"></section>
 
-      <section class="grid two">
-        <article class="panel">
+        <section class="panel">
           <div class="panel-header">
-            <h2>최근 활동</h2>
+            <div>
+              <p class="section-kicker">RECENT TRADES</p>
+              <h2>최근 거래</h2>
+            </div>
             <span id="feed-count" class="muted"></span>
           </div>
-          <div id="activity-feed" class="feed empty">아직 활동 기록이 없습니다.</div>
-        </article>
+          <div id="activity-feed" class="feed empty">최근 거래 기록이 없습니다.</div>
+        </section>
 
-        <article class="panel">
-          <div class="panel-header">
-            <h2>운영 상태</h2>
+        <section class="panel panel-split">
+          <div>
+            <div class="panel-header">
+              <div>
+                <p class="section-kicker">STRATEGY VERSION</p>
+                <h2>전략 버전별 성과</h2>
+              </div>
+            </div>
+            <div id="strategy-version-list" class="feed empty">데이터 없음</div>
           </div>
-          <div id="operator-status" class="stack"></div>
-        </article>
-      </section>
+          <div>
+            <div class="panel-header">
+              <div>
+                <p class="section-kicker">MARKET REGIME</p>
+                <h2>국면별 성과</h2>
+              </div>
+            </div>
+            <div id="market-regime-list" class="feed empty">데이터 없음</div>
+          </div>
+        </section>
 
-      <section class="grid two">
-        <article class="panel">
+        <section class="panel">
           <div class="panel-header">
-            <h2>Equity Curve</h2>
+            <div>
+              <p class="section-kicker">DEPLOY CHECKLIST</p>
+              <h2>실거래 반영 체크리스트</h2>
+            </div>
           </div>
-          <div id="equity-chart" class="chart"></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>PnL / Run Mix</h2>
-          </div>
-          <div id="distribution-chart" class="stack"></div>
-        </article>
-      </section>
+          <div id="deploy-checklist" class="feed empty">체크리스트 로딩 전</div>
+        </section>
+      </div>
     </div>
 
-    <script src="/static/dashboard.js"></script>
+    <script src="/static/dashboard.js?v=20260329a"></script>
   </body>
 </html>

@@ -82,8 +82,8 @@ sideway_filter:
   range_threshold: 0.01
   volatility_block_on_low: true
   breakout_exception_enabled: true
-  breakout_exception_momentum_min: 0.001
-  breakout_exception_trend_gap_ratio: 0.8
+  breakout_exception_momentum_min: 0.0005
+  breakout_exception_trend_gap_ratio: 0.65
   breakout_exception_allow_bearish_higher_tf: false
   breakout_exception_allow_low_volatility: true
 strategy_route:

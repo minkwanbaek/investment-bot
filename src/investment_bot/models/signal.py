@@ -7,3 +7,4 @@ class TradeSignal(BaseModel):
     action: Literal["buy", "sell", "hold"]
     confidence: float = Field(ge=0, le=1)
     reason: str
+    meta: dict = Field(default_factory=dict)

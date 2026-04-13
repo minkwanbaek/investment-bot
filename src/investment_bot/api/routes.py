@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -6,10 +7,24 @@ from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
 from investment_bot.models.market import Candle
-from investment_bot.services.container import get_account_service, get_alert_service, get_auto_trade_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client, get_visualization_service, get_drift_report_service
+from investment_bot.services.container import get_account_service, get_alert_service, get_auto_trade_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_live_trade_sync_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client, get_visualization_service, get_drift_report_service
+from investment_bot.services.dashboard_service import DashboardService
+from investment_bot.services.ledger_store import LedgerStore
+from investment_bot.services.live_deploy_checklist_service import LiveDeployChecklistService
+from investment_bot.services.metrics_service import MetricsService
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
 router = APIRouter()
+
+
+@router.get("/")
+def dashboard_root() -> FileResponse:
+    return FileResponse(Path(__file__).resolve().parent.parent / 'static' / 'dashboard.html')
+
+
+@router.get("/investment-bot")
+def dashboard_investment_bot() -> FileResponse:
+    return FileResponse(Path(__file__).resolve().parent.parent / 'static' / 'dashboard.html')
 
 
 class DryRunCycleRequest(BaseModel):
@@ -99,6 +114,65 @@ def validate_config() -> dict:
     return get_config_service().validate()
 
 
+@router.get("/dashboard/data")
+def dashboard_data() -> dict:
+    """
+    대시보드에 실제 데이터를 제공합니다.
+    paper_ledger.json 을 읽어 현재 포지션, 현금, 실현 손익 등을 반환합니다.
+    """
+    settings = get_settings()
+    if not settings.ledger_path:
+        raise HTTPException(status_code=400, detail="ledger_path is not configured")
+    
+    ledger_store = LedgerStore(settings.ledger_path)
+    ledger_data = ledger_store.load() or {}
+    
+    positions = ledger_data.get("positions", {})
+    cash = ledger_data.get("cash_balance", 0)
+    realized_pnl = ledger_data.get("total_realized_pnl", 0)
+    last_prices = ledger_data.get("last_prices", {})
+    
+    # 포지션 목록 구성
+    position_list = []
+    total_position_value = 0.0
+    
+    for symbol, pos in positions.items():
+        quantity = pos.get("quantity", 0.0)
+        if quantity > 0:
+            average_price = pos.get("average_price", 0.0)
+            market_price = last_prices.get(symbol, average_price)
+            market_value = quantity * market_price
+            cost_basis = quantity * average_price
+            unrealized_pnl = market_value - cost_basis
+            pnl_pct = ((market_price - average_price) / average_price * 100) if average_price > 0 else 0
+            
+            total_position_value += market_value
+            
+            position_list.append({
+                "symbol": symbol,
+                "quantity": quantity,
+                "average_price": average_price,
+                "current_price": market_price,
+                "market_value": market_value,
+                "unrealized_pnl": unrealized_pnl,
+                "pnl_pct": pnl_pct,
+                "opened_at": pos.get("opened_at"),
+            })
+    
+    total_equity = cash + total_position_value
+    
+    return {
+        "cash_balance": cash,
+        "total_equity": total_equity,
+        "total_position_value": total_position_value,
+        "realized_pnl": realized_pnl,
+        "position_count": len(position_list),
+        "positions": position_list,
+        "last_prices": last_prices,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/dashboard", response_class=FileResponse)
 def dashboard() -> FileResponse:
     dashboard_path = Path(__file__).resolve().parent.parent / "static" / "dashboard.html"
@@ -125,6 +199,29 @@ def paper_portfolio() -> dict:
 @router.get("/paper/export")
 def export_paper_state() -> dict:
     return get_paper_broker().export_state()
+
+
+@router.get("/operator/live-dashboard")
+def operator_live_dashboard(limit: int = 20) -> dict:
+    settings = get_settings()
+    if not settings.ledger_path:
+        raise HTTPException(status_code=400, detail="ledger_path is not configured")
+    ledger_payload = LedgerStore(settings.ledger_path).load() or {}
+    trade_logs = ledger_payload.get("trade_logs", [])
+    summary = MetricsService().summarize_trade_logs_by_dimension(trade_logs)
+    dashboard = DashboardService().build_trade_log_dashboard(summary=summary, trade_logs=trade_logs, limit=limit)
+    return dashboard
+
+
+@router.get("/operator/deploy-checklist")
+def operator_deploy_checklist() -> dict:
+    settings = get_settings()
+    service = LiveDeployChecklistService()
+    checklist_path = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'deploy_checklist.json'
+    saved = service.load(str(checklist_path))
+    if saved is not None:
+        return saved
+    return service.build(version=settings.auto_trade_strategy_version)
 
 
 @router.post("/paper/reset")
@@ -408,24 +505,17 @@ def summarize_recent_runs(limit: int = 20) -> dict:
     return get_run_history_service().summarize_recent(limit=limit)
 
 
+@router.post("/operator/live-trades/sync")
+def sync_live_trades(uuid: str | None = None) -> dict:
+    service = get_live_trade_sync_service()
+    if uuid:
+        return service.sync_order(uuid)
+    return service.sync_latest_submitted_order()
+
+
 @router.get("/operator/drift-report")
 def operator_drift_report(limit: int = 50) -> dict:
     return get_drift_report_service().summarize(limit=limit)
-
-
-@router.get("/operator/live-dashboard")
-def operator_live_dashboard(limit: int = 20) -> dict:
-    recent_runs = get_run_history_service().list_recent(limit=limit)
-    return {
-        "health": health(),
-        "summary": get_run_history_service().summarize_recent(limit=limit),
-        "paper_portfolio": paper_portfolio(),
-        "profit_structure": get_visualization_service().summarize_profit_structure(limit=max(limit, 10)),
-        "drift_report": get_drift_report_service().summarize(limit=max(limit, 10)),
-        "auto_trade": get_auto_trade_service().status(),
-        "recent_runs": recent_runs,
-        "latest_run": recent_runs[-1] if recent_runs else None,
-    }
 
 
 @router.get("/auto-trade/status")

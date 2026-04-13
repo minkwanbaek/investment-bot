@@ -11,9 +11,9 @@ def test_config_service_exposes_live_mode_controls():
             max_drawdown_pct=10.0,
             symbols=["BTC/KRW"],
             enabled_strategies=["trend_following"],
-            live_mode="shadow",
-            confirm_live_trading=False,
+            live_mode="live",
+            confirm_live_trading=True,
         )
     ).validate()
-    assert result["resolved"]["live_mode"] == "shadow"
-    assert result["resolved"]["confirm_live_trading"] is False
+    assert result["resolved"]["live_mode"] == "live"
+    assert result["resolved"]["confirm_live_trading"] is True

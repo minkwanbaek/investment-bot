@@ -15,6 +15,7 @@ from investment_bot.services.exchange_rules_service import ExchangeRulesService
 from investment_bot.services.fail_safe_service import FailSafeService
 from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.live_execution_service import LiveExecutionService
+from investment_bot.services.live_trade_sync_service import LiveTradeSyncService
 from investment_bot.services.market_data_service import MarketDataService
 from investment_bot.services.metrics_service import MetricsService
 from investment_bot.services.paper_broker import PaperBroker
@@ -139,6 +140,16 @@ def get_live_execution_service() -> LiveExecutionService:
         account_service=get_account_service(),
         live_mode=settings.live_mode,
         confirm_live_trading=settings.confirm_live_trading,
+    )
+
+
+@lru_cache
+def get_live_trade_sync_service() -> LiveTradeSyncService:
+    settings = get_settings()
+    return LiveTradeSyncService(
+        run_history_service=get_run_history_service(),
+        live_execution_service=get_live_execution_service(),
+        ledger_store=LedgerStore(settings.ledger_path),
     )
 
 

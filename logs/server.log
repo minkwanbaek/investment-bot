@@ -1,0 +1,12 @@
+INFO:     Started server process [281014]
+INFO:     Waiting for application startup.
+INFO:     startup_auto_trade: auto_trade_enabled=True
+INFO:     startup_auto_trade: service.active=False before start
+/home/javajinx7/.openclaw/workspace/projects/investment-bot/.venv/lib/python3.10/site-packages/jwt/api_jwt.py:147: InsecureKeyLengthWarning: The HMAC key is 40 bytes long, which is below the minimum recommended length of 64 bytes for SHA512. See RFC 7518 Section 3.2.
+  return self._jws.encode(
+run_history.append SLOW | kind=auto_trade_start id=23352 elapsed=3.911s cache_invalidated=True
+INFO:     startup_auto_trade: start() result={'status': 'started', 'active': True, 'profile': {'enabled': True, 'symbol': 'BTC/KRW', 'symbols': ['BTC/KRW', 'ETH/KRW', 'SOL/KRW', 'XRP/KRW', 'ADA/KRW', 'DOGE/KRW', 'XLM/KRW', 'TRX/KRW', 'HBAR/KRW', 'LINK/KRW', 'APT/KRW', 'SUI/KRW', 'AVAX/KRW', 'DOT/KRW', 'SEI/KRW', 'ONDO/KRW', 'ENA/KRW', 'WLD/KRW', 'ARB/KRW', 'OP/KRW', 'FIL/KRW', 'NEAR/KRW', 'UNI/KRW', 'ATOM/KRW', 'ETC/KRW', 'ALGO/KRW', 'VET/KRW', 'ICP/KRW', 'SAND/KRW', 'MANA/KRW', 'AXS/KRW', 'THETA/KRW', 'XTZ/KRW', 'BSV/KRW', 'BCH/KRW', 'QTUM/KRW', 'BAT/KRW', 'ZIL/KRW', 'IOST/KRW', 'ONT/KRW', 'ICX/KRW', 'SC/KRW'], 'dynamic_symbol_selection': False, 'dynamic_symbol_top_n': 10, 'last_selected_symbols': [], 'enabled_strategies': ['dca', 'mean_reversion', 'trend_following'], 'strategy_name': 'trend_following', 'timeframe': '5m', 'limit': 100, 'interval_seconds': 300, 'min_krw_balance': 15000.0, 'target_allocation_pct': 20.0, 'meaningful_order_notional': 8000.0, 'max_pending_seconds': 600, 'cooldown_cycles': 1, 'stop_loss_pct': 1.5, 'partial_take_profit_pct': 2.0, 'trailing_stop_pct': 1.0, 'partial_sell_ratio': 0.5, 'max_total_exposure_pct': 80.0, 'min_managed_position_notional': 1500.0}, 'last_submitted_at': None, 'last_result': None}
+INFO:     Application startup complete.
+ERROR:    [Errno 98] error while attempting to bind on address ('0.0.0.0', 8445): address already in use
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.

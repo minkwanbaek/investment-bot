@@ -1,11 +1,12 @@
 from investment_bot.models.signal import TradeSignal
 from investment_bot.strategies.base import BaseStrategy
+from investment_bot.services.paper_broker import PaperBroker
 
 
 class DCAStrategy(BaseStrategy):
     name = "dca"
 
-    def generate_signal(self, candles):
+    def generate_signal(self, candles, broker: PaperBroker | None = None):
         symbol = candles[-1].symbol if candles else "BTC/KRW"
         closes = [c.close for c in candles]
         if len(closes) < 8:

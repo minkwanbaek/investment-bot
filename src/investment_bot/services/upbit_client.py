@@ -1,12 +1,11 @@
-import base64
 import hashlib
-import hmac
-import json
 import os
 import uuid
-from urllib.parse import urlencode
+from collections.abc import Mapping
+from urllib.parse import unquote, urlencode
 
 import httpx
+import jwt
 
 
 class UpbitClient:
@@ -25,10 +24,15 @@ class UpbitClient:
         return self._request("GET", "/v1/market/all", params={"isDetails": str(is_details).lower()}, auth=False)
 
     def get_ticker(self, markets: list[str]) -> list[dict]:
+        if not markets:
+            return []
+        # Upbit accepts comma-separated markets in a single request (up to ~100)
+        batch_size = 50
         payload = []
-        for market in markets:
+        for i in range(0, len(markets), batch_size):
+            batch = markets[i:i + batch_size]
             try:
-                rows = self._request("GET", "/v1/ticker", params={"markets": market}, auth=False)
+                rows = self._request("GET", "/v1/ticker", params={"markets": ",".join(batch)}, auth=False)
                 if isinstance(rows, list):
                     payload.extend(rows)
             except Exception:
@@ -48,18 +52,28 @@ class UpbitClient:
             },
         )
 
+    def get_order(self, uuid_value: str) -> dict:
+        return self._request("GET", "/v1/order", params={"uuid": uuid_value})
+
     def _request(self, method: str, path: str, params: dict | None = None, auth: bool = True) -> list[dict] | dict:
         headers = {"accept": "application/json"}
         if auth:
             if not self.configured():
                 raise ValueError("Upbit credentials are not configured")
             headers["Authorization"] = f"Bearer {self._create_jwt(params or {})}"
+        request_kwargs = {
+            "headers": headers,
+            "timeout": 10.0,
+        }
+        if method.upper() == "GET":
+            request_kwargs["params"] = params
+        elif params:
+            request_kwargs["data"] = params
+
         response = httpx.request(
             method,
             f"{self.base_url}{path}",
-            params=params,
-            headers=headers,
-            timeout=10.0,
+            **request_kwargs,
         )
         response.raise_for_status()
         return response.json()
@@ -70,17 +84,15 @@ class UpbitClient:
             "nonce": str(uuid.uuid4()),
         }
         if params:
-            query_string = urlencode(params, doseq=True)
+            query_string = self._build_query_string(params)
             payload["query_hash"] = hashlib.sha512(query_string.encode()).hexdigest()
             payload["query_hash_alg"] = "SHA512"
         return self._encode_hs256(payload, self.secret_key)
 
+    def _build_query_string(self, params: dict) -> str:
+        data = params if isinstance(params, Mapping) else params
+        return unquote(urlencode(data, doseq=True))
+
     def _encode_hs256(self, payload: dict, secret: str) -> str:
-        header = {"alg": "HS512", "typ": "JWT"}
-
-        def b64url(data: bytes) -> str:
-            return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-        signing_input = f"{b64url(json.dumps(header, separators=(',', ':')).encode())}.{b64url(json.dumps(payload, separators=(',', ':')).encode())}"
-        signature = hmac.new(secret.encode(), signing_input.encode(), hashlib.sha512).digest()
-        return f"{signing_input}.{b64url(signature)}"
+        token = jwt.encode(payload, secret, algorithm="HS512")
+        return token if isinstance(token, str) else token.decode("utf-8")

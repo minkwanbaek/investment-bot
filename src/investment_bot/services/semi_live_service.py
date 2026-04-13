@@ -11,13 +11,14 @@ class SemiLiveService:
     trading_cycle_service: TradingCycleService
     run_history_service: RunHistoryService
 
-    def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5) -> dict:
-        candles = self.market_data_service.get_recent_candles(
-            adapter_name="live",
-            symbol=symbol,
-            timeframe=timeframe,
-            limit=limit,
-        )
+    def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5, candles: list | None = None) -> dict:
+        if candles is None:
+            candles = self.market_data_service.get_recent_candles(
+                adapter_name="live",
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=limit,
+            )
         result = {
             "adapter": "live",
             "symbol": symbol,

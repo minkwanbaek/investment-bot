@@ -6,7 +6,9 @@ BASE = pathlib.Path('/home/javajinx7/.openclaw/workspace/projects/investment-bot
 OUT = BASE / 'ops'
 OUT.mkdir(parents=True, exist_ok=True)
 RUN_HISTORY = BASE / 'data' / 'run_history.json'
-TS = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
+KST = datetime.timezone(datetime.timedelta(hours=9), name='KST')
+TS_UTC = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+TS_KST = datetime.datetime.now(datetime.timezone.utc).astimezone(KST).replace(microsecond=0).strftime('%Y-%m-%d %H:%M KST')
 
 
 def fetch(url):
@@ -33,7 +35,8 @@ for row in recent:
             skip_blockers[f'{reason}:{blocker}'] += 1
 
 snapshot = {
-    'timestamp': TS,
+    'timestamp': TS_UTC,
+    'timestamp_kst': TS_KST,
     'health': health,
     'auto_trade_status': status,
     'config_summary': {
