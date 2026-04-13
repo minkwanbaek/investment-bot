@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>투자봇 대시보드</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260329a" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260413a" />
   </head>
   <body>
     <div class="page-shell">
@@ -57,6 +57,27 @@
           </div>
         </section>
 
+        <section class="panel panel-split">
+          <div>
+            <div class="panel-header">
+              <div>
+                <p class="section-kicker">POLICY SNAPSHOT</p>
+                <h2>정책 기준점</h2>
+              </div>
+            </div>
+            <div id="policy-snapshot" class="feed empty">정책 스냅샷 로딩 전</div>
+          </div>
+          <div>
+            <div class="panel-header">
+              <div>
+                <p class="section-kicker">LATEST OBSERVATIONS</p>
+                <h2>최근 정책 관측</h2>
+              </div>
+            </div>
+            <div id="policy-observations" class="feed empty">관측 기록 로딩 전</div>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="panel-header">
             <div>
@@ -69,6 +90,6 @@
       </div>
     </div>
 
-    <script src="/static/dashboard.js?v=20260329a"></script>
+    <script src="/static/dashboard.js?v=20260413a"></script>
   </body>
 </html>

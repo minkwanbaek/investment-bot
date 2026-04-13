@@ -118,6 +118,95 @@ function renderChecklist(data) {
   `).join('');
 }
 
+function renderPolicyState(data) {
+  const policyState = data.policy_snapshot;
+  if (!policyState) {
+    const el = document.getElementById('policy-snapshot');
+    if (el) {
+      el.className = 'feed empty';
+      el.textContent = '정책 스냅샷 데이터 없음';
+    }
+    return;
+  }
+
+  const policy = policyState.policy || {};
+  const state = policyState.state || {};
+  const observations = data.policy_observations || [];
+
+  // Render policy snapshot
+  const policyEl = document.getElementById('policy-snapshot');
+  if (policyEl) {
+    const policyItems = [
+      { label: 'max_consecutive_buys', value: policy.max_consecutive_buys },
+      { label: 'sideway_filter_enabled', value: policy.sideway_filter_enabled ? '활성' : '비활성' },
+      { label: 'uncertain_block_enabled', value: policy.uncertain_block_enabled ? '활성' : '비활성' },
+      { label: 'high_volatility_defense', value: policy.high_volatility_defense_enabled ? '활성' : '비활성' },
+      { label: 'max_symbol_exposure', value: `${policy.max_symbol_exposure_pct}%` },
+      { label: 'max_total_exposure', value: `${policy.max_total_exposure_pct}%` },
+      { label: 'meaningful_order_notional', value: won(policy.meaningful_order_notional) },
+    ];
+
+    policyEl.className = 'feed';
+    policyEl.innerHTML = `
+      <div class="feed-item">
+        <div class="feed-item-top"><span class="badge">POLICY</span></div>
+        <div class="meta-line" style="display:block;">
+          ${policyItems.map((item) => `
+            <div style="display:flex;justify-content:space-between;padding:2px 0;">
+              <span style="font-size:0.85em;color:#666;">${item.label}</span>
+              <span style="font-size:0.85em;font-weight:600;">${item.value}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="feed-item">
+        <div class="feed-item-top"><span class="badge">STATE</span></div>
+        <div class="meta-line" style="display:block;">
+          <div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span style="font-size:0.85em;color:#666;">consecutive_buys</span>
+            <span style="font-size:0.85em;font-weight:600;">${state.consecutive_buys || 0}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span style="font-size:0.85em;color:#666;">losing_streak</span>
+            <span style="font-size:0.85em;font-weight:600;">${state.losing_streak || 0}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span style="font-size:0.85em;color:#666;">cash_balance</span>
+            <span style="font-size:0.85em;font-weight:600;">${won(state.cash_balance)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0;">
+            <span style="font-size:0.85em;color:#666;">positions</span>
+            <span style="font-size:0.85em;font-weight:600;">${state.positions_count || 0}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Render latest observations
+  const obsEl = document.getElementById('policy-observations');
+  if (obsEl) {
+    if (!observations.length) {
+      obsEl.className = 'feed empty';
+      obsEl.textContent = '최근 관측 기록 없음';
+      return;
+    }
+    obsEl.className = 'feed';
+    obsEl.innerHTML = observations.map((obs) => `
+      <div class="feed-item">
+        <div class="feed-item-top">
+          <span class="badge ${obs.block_reason ? 'sell' : 'buy'}">${obs.block_reason ? 'BLOCK' : 'PASS'}</span>
+          <span class="badge">${obs.policy_name}</span>
+        </div>
+        <div class="meta-line">
+          <span>${obs.symbol || '-'}</span>
+          <span style="font-size:0.8em;">${obs.block_reason || 'policy_check_passed'}</span>
+        </div>
+      </div>
+    `).join('');
+  }
+}
+
 async function loadDashboard() {
   const [dashboardRes, checklistRes] = await Promise.all([
     fetch('/operator/live-dashboard?limit=20', { cache: 'no-store' }),
@@ -140,6 +229,7 @@ async function loadDashboard() {
     </div>
   `);
   renderChecklist(checklist);
+  renderPolicyState(data);
   document.getElementById('last-updated').textContent = new Date().toLocaleTimeString('ko-KR');
 }
 

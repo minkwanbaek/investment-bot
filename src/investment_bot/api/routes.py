@@ -209,7 +209,57 @@ def operator_live_dashboard(limit: int = 20) -> dict:
     ledger_payload = LedgerStore(settings.ledger_path).load() or {}
     trade_logs = ledger_payload.get("trade_logs", [])
     summary = MetricsService().summarize_trade_logs_by_dimension(trade_logs)
-    dashboard = DashboardService().build_trade_log_dashboard(summary=summary, trade_logs=trade_logs, limit=limit)
+    
+    # Build policy snapshot from current settings
+    from investment_bot.core.trading_policy import build_trading_policy
+    policy = build_trading_policy(settings)
+    snapshot = policy.snapshot
+    
+    # Extract current state from ledger/paper broker
+    current_state = {
+        "consecutive_buys": ledger_payload.get("consecutive_buys", 0),
+        "losing_streak": ledger_payload.get("losing_streak", 0),
+        "total_equity": ledger_payload.get("cash_balance", 0) + sum(
+            pos.get("quantity", 0) * ledger_payload.get("last_prices", {}).get(symbol, 0)
+            for symbol, pos in ledger_payload.get("positions", {}).items()
+        ),
+        "cash_balance": ledger_payload.get("cash_balance", 0),
+        "positions_count": len(ledger_payload.get("positions", {})),
+    }
+    
+    # Convert snapshot to dict for API response
+    policy_snapshot_dict = {
+        "max_consecutive_buys": snapshot.max_consecutive_buys,
+        "trend_strategy_allowed_regimes": list(snapshot.trend_strategy_allowed_regimes),
+        "range_strategy_allowed_regimes": list(snapshot.range_strategy_allowed_regimes),
+        "uncertain_block_enabled": snapshot.uncertain_block_enabled,
+        "sideway_filter_enabled": snapshot.sideway_filter_enabled,
+        "sideway_filter_trend_gap_threshold": snapshot.sideway_filter_trend_gap_threshold,
+        "sideway_filter_range_threshold": snapshot.sideway_filter_range_threshold,
+        "sideway_filter_volatility_block_on_low": snapshot.sideway_filter_volatility_block_on_low,
+        "sideway_filter_breakout_exception_enabled": snapshot.sideway_filter_breakout_exception_enabled,
+        "sideway_filter_breakout_exception_momentum_min": snapshot.sideway_filter_breakout_exception_momentum_min,
+        "sideway_filter_breakout_exception_trend_gap_ratio": snapshot.sideway_filter_breakout_exception_trend_gap_ratio,
+        "sideway_filter_breakout_exception_allow_bearish_higher_tf": snapshot.sideway_filter_breakout_exception_allow_bearish_higher_tf,
+        "sideway_filter_breakout_exception_allow_low_volatility": snapshot.sideway_filter_breakout_exception_allow_low_volatility,
+        "high_volatility_defense_enabled": snapshot.high_volatility_defense_enabled,
+        "volatility_size_multipliers": snapshot.volatility_size_multipliers,
+        "meaningful_order_notional": snapshot.meaningful_order_notional,
+        "min_managed_position_notional": snapshot.min_managed_position_notional,
+        "max_symbol_exposure_pct": snapshot.max_symbol_exposure_pct,
+        "max_total_exposure_pct": snapshot.max_total_exposure_pct,
+        "target_allocation_pct": snapshot.target_allocation_pct,
+    }
+    
+    dashboard = DashboardService().build_trade_log_dashboard(
+        summary=summary,
+        trade_logs=trade_logs,
+        limit=limit,
+        policy_snapshot={
+            "policy": policy_snapshot_dict,
+            "state": current_state,
+        },
+    )
     return dashboard
 
 

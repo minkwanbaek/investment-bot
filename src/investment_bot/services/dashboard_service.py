@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import re
+from typing import Any
 
 
 @dataclass
@@ -61,7 +62,77 @@ class DashboardService:
         
         # fallback: 원본 반환
         return reason
-    def build_trade_log_dashboard(self, summary: dict, trade_logs: list[dict], limit: int = 20) -> dict:
+
+    def extract_policy_observations(self, trade_logs: list[dict]) -> list[dict]:
+        """Extract latest policy observations from trade logs for observability.
+        
+        Returns list of policy observations with:
+        - policy_name: which policy was evaluated
+        - policy_value: the policy threshold/limit
+        - current_state: the actual state value
+        - block_reason: if blocked, why (None if passed)
+        """
+        observations = []
+        
+        # Extract from most recent trades (last 10)
+        recent_logs = list(trade_logs)[-10:] if trade_logs else []
+        
+        for log in recent_logs:
+            review = log.get("review", {})
+            meta = log.get("meta", {})
+            
+            # Route policy observations
+            if meta.get("block_reason"):
+                block_reasons = str(meta.get("block_reason", "")).split(",")
+                for reason in block_reasons:
+                    reason = reason.strip()
+                    if reason:
+                        observations.append({
+                            "policy_name": "route_filter",
+                            "policy_value": "regime-based routing rules",
+                            "current_state": meta.get("market_regime", "unknown"),
+                            "block_reason": reason,
+                            "timestamp": log.get("entry_time"),
+                            "symbol": log.get("symbol"),
+                        })
+            
+            # Risk controller observations
+            if review.get("risk_mode"):
+                observations.append({
+                    "policy_name": "risk_mode",
+                    "policy_value": review.get("risk_mode", "normal"),
+                    "current_state": {
+                        "losing_streak": review.get("losing_streak", 0),
+                        "volatility_state": review.get("volatility_state", "normal"),
+                    },
+                    "block_reason": None if review.get("approved") else "risk_mode_size_reduction",
+                    "timestamp": log.get("entry_time"),
+                    "symbol": log.get("symbol"),
+                })
+            
+            # Exposure observations (if available in broker_result)
+            broker_result = log.get("broker_result", {})
+            if broker_result.get("block_reason"):
+                observations.append({
+                    "policy_name": "exposure_limit",
+                    "policy_value": broker_result.get("policy_limit"),
+                    "current_state": broker_result.get("current_exposure"),
+                    "block_reason": broker_result.get("block_reason"),
+                    "timestamp": log.get("entry_time"),
+                    "symbol": log.get("symbol"),
+                })
+        
+        # Deduplicate by (policy_name, block_reason, timestamp)
+        seen = set()
+        unique = []
+        for obs in observations:
+            key = (obs["policy_name"], obs.get("block_reason"), obs.get("timestamp"))
+            if key not in seen:
+                seen.add(key)
+                unique.append(obs)
+        
+        return unique[-5:]  # Return last 5 unique observations
+    def build_trade_log_dashboard(self, summary: dict, trade_logs: list[dict], limit: int = 20, policy_snapshot: dict | None = None) -> dict:
         recent = list(trade_logs)[-limit:]
         recent.reverse()
 
@@ -76,6 +147,9 @@ class DashboardService:
             trade_copy["reason_kr"] = self.reason_to_korean(trade.get("entry_reason", ""))
             recent_trades.append(trade_copy)
 
+        # Extract policy observations for observability
+        policy_observations = self.extract_policy_observations(trade_logs)
+
         return {
             "summary_cards": {
                 "max_drawdown": summary.get("overall", {}).get("all", {}).get("max_drawdown"),
@@ -87,6 +161,8 @@ class DashboardService:
             "recent_trades": recent_trades,
             "by_strategy_version": summary.get("by_strategy_version", {}),
             "by_market_regime": summary.get("by_market_regime", {}),
+            "policy_snapshot": policy_snapshot,
+            "policy_observations": policy_observations,
         }
 
     def _build_equity_curve(self, trade_logs: list[dict]) -> list[dict]:

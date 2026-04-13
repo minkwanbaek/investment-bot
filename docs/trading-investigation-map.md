@@ -2114,4 +2114,5 @@ trading:
 - ✅ route_exception_pass 작동 확인 (34 건)
 - ✅ 숨은 병목 규명 (`max_consecutive_buys=3`)
 - ✅ docs/trading-investigation-map.md 업데이트 완료
+- ✅ docs/dashboard-policy-state-separation.md 추가 완료 (policy/state 분리 설계)
 - ⏳ git commit 수행 예정 (실운영 복귀 설정으로 원복 후)
