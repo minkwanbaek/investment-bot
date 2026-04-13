@@ -1,6 +1,12 @@
 from statistics import mean
 from typing import Sequence
 
+from investment_bot.core.trading_policy import (
+    REGIME_SIDEWAYS,
+    REGIME_TREND_DOWN,
+    REGIME_TREND_UP,
+    REGIME_UNCERTAIN,
+)
 from investment_bot.models.market import Candle
 
 
@@ -9,7 +15,7 @@ class MarketRegimeClassifier:
         closes = [c.close for c in candles]
         if len(closes) < 8:
             return {
-                "regime": "unknown",
+                "regime": REGIME_UNCERTAIN,
                 "reason": "insufficient_data",
                 "volatility_state": "normal",
                 "higher_tf_bias": "neutral",
@@ -47,13 +53,13 @@ class MarketRegimeClassifier:
             higher_tf_bias = "neutral"
 
         if range_pct < 0.01 or abs(trend_gap_pct) < 0.0015:
-            regime = "sideways"
+            regime = REGIME_SIDEWAYS
         elif trend_gap_pct > 0 and momentum_pct > 0:
-            regime = "uptrend"
+            regime = REGIME_TREND_UP
         elif trend_gap_pct < 0 and momentum_pct < 0:
-            regime = "downtrend"
+            regime = REGIME_TREND_DOWN
         else:
-            regime = "mixed"
+            regime = REGIME_UNCERTAIN
         return {
             "regime": regime,
             "trend_gap_pct": round(trend_gap_pct, 6),

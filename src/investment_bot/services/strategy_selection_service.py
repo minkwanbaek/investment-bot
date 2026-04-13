@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+from investment_bot.core.settings import get_settings
+from investment_bot.core.trading_policy import build_trading_policy
+
 
 @dataclass
 class StrategySelectionService:
@@ -13,23 +16,27 @@ class StrategySelectionService:
 
     def _allowed_strategies(self, symbol: str, regime: str) -> list[str]:
         symbol = symbol.upper()
-        # Regime names unified: sideways (not ranging), trend_up/trend_down (not uptrend/downtrend), uncertain (not mixed/unknown)
+        normalized_regime = build_trading_policy(get_settings()).normalize_regime(regime)
         if symbol == "BTC/KRW":
-            if regime in {"trend_up", "trend_down", "sideways"}:
+            if normalized_regime in {"trend_up", "trend_down", "sideways"}:
                 return ["trend_following"]
-            if regime in {"sideways", "uncertain"}:
+            if normalized_regime in {"sideways", "uncertain"}:
                 return ["dca"]
             return []
         if symbol == "ETH/KRW":
-            if regime in {"trend_up", "sideways"}:
+            if normalized_regime in {"trend_up", "sideways"}:
                 return ["trend_following"]
-            if regime in {"trend_down", "sideways", "uncertain"}:
+            if normalized_regime in {"trend_down", "uncertain"}:
                 return ["mean_reversion"]
+            if normalized_regime == "sideways":
+                return ["trend_following", "mean_reversion"]
             return []
         if symbol == "SOL/KRW":
-            if regime in {"trend_up", "sideways"}:
+            if normalized_regime == "trend_up":
                 return ["trend_following"]
-            if regime in {"trend_down", "sideways", "uncertain"}:
+            if normalized_regime == "sideways":
+                return ["trend_following", "mean_reversion", "dca"]
+            if normalized_regime in {"trend_down", "uncertain"}:
                 return ["mean_reversion", "dca"]
             return []
-        return ["trend_following"] if regime in {"trend_up", "trend_down", "sideways"} else []
+        return ["trend_following"] if normalized_regime in {"trend_up", "trend_down", "sideways"} else []

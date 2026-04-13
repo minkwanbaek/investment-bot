@@ -89,10 +89,10 @@ sideway_filter:
   breakout_exception_allow_low_volatility: true  # Keep: low vol is normal now
 strategy_route:
   trend_strategy_allowed_regimes:
-  - uptrend
-  - downtrend
+  - trend_up
+  - trend_down
   range_strategy_allowed_regimes:
-  - ranging
+  - sideways
   uncertain_block_enabled: true  # Restored
 risk_control:
   higher_tf_bias_filter_enabled: false

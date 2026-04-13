@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from investment_bot.core.settings import get_settings
+from investment_bot.core.trading_policy import build_trading_policy
 from investment_bot.models.signal import TradeSignal
 
 
@@ -24,6 +25,7 @@ class RiskController:
         side = signal.action
 
         settings = get_settings()
+        policy = build_trading_policy(settings)
 
         if approved and not force_exit and settings.time_blacklist_filter_enabled and now_hour in set(settings.blocked_hours):
             approved = False
@@ -37,7 +39,7 @@ class RiskController:
                 approved = False
                 block_reason = "higher_tf_bias_mismatch"
 
-        if approved and not force_exit and settings.high_volatility_defense_enabled and volatility_state == "high":
+        if approved and not force_exit and policy.snapshot.high_volatility_defense_enabled and volatility_state == "high":
             position_value_budget *= 0.5
 
         if approved and signal.action == "buy":
@@ -55,7 +57,7 @@ class RiskController:
         allowed_risk = cash_balance * settings.risk_control_risk_per_trade_pct
         if not (approved and force_exit and signal.action == "sell"):
             position_value_budget = min(position_value_budget, max(allowed_risk * 10, self.min_order_notional))
-            position_value_budget *= settings.volatility_size_multipliers.get(volatility_state, 1.0)
+            position_value_budget *= policy.snapshot.volatility_size_multipliers.get(volatility_state, 1.0)
 
         losing_streak = int(signal_meta.get("losing_streak", 0) or 0)
         risk_mode = "normal"

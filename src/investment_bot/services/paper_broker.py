@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from investment_bot.core.settings import get_settings
+from investment_bot.core.trading_policy import PolicyObservation
 
 from investment_bot.models.order import PaperOrder
 from investment_bot.models.portfolio import PortfolioSnapshot, PositionSnapshot
@@ -135,7 +136,17 @@ class PaperBroker:
         if action == "sell" and notional_value < self.min_order_notional:
             return {"status": "rejected", "reason": "below_min_order_notional", "min_order_notional": self.min_order_notional}
         if action == "buy" and self.consecutive_buys >= self.max_consecutive_buys:
-            return {"status": "rejected", "reason": "max_consecutive_buys_reached", "max_consecutive_buys": self.max_consecutive_buys}
+            return {
+                "status": "rejected",
+                "reason": "max_consecutive_buys_reached",
+                "max_consecutive_buys": self.max_consecutive_buys,
+                "policy": PolicyObservation(
+                    policy_name="max_consecutive_buys",
+                    policy_value=self.max_consecutive_buys,
+                    current_state=self.consecutive_buys,
+                    block_reason="max_consecutive_buys_reached",
+                ).as_dict(),
+            }
         if action == "buy" and total_buy_cost > self.cash_balance:
             return {"status": "rejected", "reason": "insufficient_cash", "cash_balance": self.cash_balance}
         if action == "buy":
@@ -146,6 +157,12 @@ class PaperBroker:
                     "status": "rejected",
                     "reason": "max_symbol_exposure_reached",
                     "max_symbol_exposure_pct": self.max_symbol_exposure_pct,
+                    "policy": PolicyObservation(
+                        policy_name="max_symbol_exposure_pct",
+                        policy_value=self.max_symbol_exposure_pct,
+                        current_state=round(((current_position_value + notional_value) / self.starting_cash) * 100, 4) if self.starting_cash > 0 else None,
+                        block_reason="max_symbol_exposure_reached",
+                    ).as_dict(),
                 }
 
         order = PaperOrder(

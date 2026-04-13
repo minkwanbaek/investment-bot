@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from investment_bot.core.settings import get_settings
+from investment_bot.core.trading_policy import build_trading_policy
 
 from investment_bot.models.market import Candle
 from investment_bot.models.signal import TradeSignal
@@ -26,10 +27,8 @@ class TradingCycleService:
         strategy = strategy_cls()
         signal: TradeSignal = strategy.generate_signal(candles, broker=self.paper_broker)
         latest_price = candles[-1].close
-        market_info = MarketRegimeClassifier().classify(candles)
-
-        # Regime names are now unified to enum values (sideways, trend_up, trend_down, uncertain)
-        # No legacy mapping needed
+        policy = build_trading_policy(get_settings())
+        market_info = policy.normalize_market_info(MarketRegimeClassifier().classify(candles))
         market_regime = market_info.get("regime", "uncertain")
         
         # Near-miss observability for trend_following
@@ -115,29 +114,29 @@ class TradingCycleService:
         }
 
     def _route_block_reason(self, strategy_name: str, market_info: dict) -> str | None:
-        settings = get_settings()
-        regime = market_info.get("regime")
-        if settings.uncertain_block_enabled and regime in {"mixed", "unknown"}:
+        policy_snapshot = build_trading_policy(get_settings()).snapshot
+        regime = build_trading_policy(get_settings()).normalize_regime(market_info.get("regime"))
+        if policy_snapshot.uncertain_block_enabled and regime == "uncertain":
             return "uncertain_regime_blocked"
-        if strategy_name == "trend_following" and regime not in set(settings.trend_strategy_allowed_regimes):
+        if strategy_name == "trend_following" and regime not in set(policy_snapshot.trend_strategy_allowed_regimes):
             return "trend_strategy_route_blocked"
-        if strategy_name == "mean_reversion" and regime not in set(settings.range_strategy_allowed_regimes):
+        if strategy_name == "mean_reversion" and regime not in set(policy_snapshot.range_strategy_allowed_regimes):
             return "range_strategy_route_blocked"
         return None
 
     def _should_block_for_sideways(self, strategy_name: str, market_info: dict) -> bool:
-        settings = get_settings()
-        if not settings.sideway_filter_enabled:
+        policy_snapshot = build_trading_policy(get_settings()).snapshot
+        if not policy_snapshot.sideway_filter_enabled:
             return False
         if strategy_name != "trend_following":
             return False
-        if market_info.get("regime") != "sideways":
+        if build_trading_policy(get_settings()).normalize_regime(market_info.get("regime")) != "sideways":
             return False
-        if settings.sideway_filter_volatility_block_on_low and market_info.get("volatility_state") == "low":
+        if policy_snapshot.sideway_filter_volatility_block_on_low and market_info.get("volatility_state") == "low":
             return True
-        if abs(float(market_info.get("trend_gap_pct", 0.0) or 0.0)) < settings.sideway_filter_trend_gap_threshold:
+        if abs(float(market_info.get("trend_gap_pct", 0.0) or 0.0)) < policy_snapshot.sideway_filter_trend_gap_threshold:
             return True
-        if settings.sideway_filter_range_threshold and float(market_info.get("range_pct", 0.0) or 0.0) < settings.sideway_filter_range_threshold:
+        if policy_snapshot.sideway_filter_range_threshold and float(market_info.get("range_pct", 0.0) or 0.0) < policy_snapshot.sideway_filter_range_threshold:
             return True
         return False
 
@@ -146,12 +145,12 @@ class TradingCycleService:
         
         Returns exception reason string if pass granted, None otherwise.
         """
-        settings = get_settings()
-        if not settings.sideway_filter_breakout_exception_enabled:
+        policy_snapshot = build_trading_policy(get_settings()).snapshot
+        if not policy_snapshot.sideway_filter_breakout_exception_enabled:
             return None
         if strategy_name != "trend_following":
             return None
-        if market_info.get("regime") != "sideways":
+        if build_trading_policy(get_settings()).normalize_regime(market_info.get("regime")) != "sideways":
             return None
         
         trend_gap_pct = float(market_info.get("trend_gap_pct", 0.0) or 0.0)
@@ -160,21 +159,21 @@ class TradingCycleService:
         higher_tf_bias = market_info.get("higher_tf_bias", "neutral")
         
         # Check momentum: must be positive
-        if momentum_pct <= settings.sideway_filter_breakout_exception_momentum_min:
+        if momentum_pct <= policy_snapshot.sideway_filter_breakout_exception_momentum_min:
             return None
         
         # Check trend_gap: must be near threshold (at least ratio × threshold)
-        min_trend_gap = settings.sideway_filter_trend_gap_threshold * settings.sideway_filter_breakout_exception_trend_gap_ratio
+        min_trend_gap = policy_snapshot.sideway_filter_trend_gap_threshold * policy_snapshot.sideway_filter_breakout_exception_trend_gap_ratio
         if trend_gap_pct < min_trend_gap:
             return None
         
         # Check higher_tf_bias: must not be bearish (unless explicitly allowed)
-        if not settings.sideway_filter_breakout_exception_allow_bearish_higher_tf:
+        if not policy_snapshot.sideway_filter_breakout_exception_allow_bearish_higher_tf:
             if higher_tf_bias == "bearish":
                 return None
         
         # Check volatility: must not be low (unless explicitly allowed)
-        if not settings.sideway_filter_breakout_exception_allow_low_volatility:
+        if not policy_snapshot.sideway_filter_breakout_exception_allow_low_volatility:
             if volatility_state == "low":
                 return None
         

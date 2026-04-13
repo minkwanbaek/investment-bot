@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 from investment_bot.core.settings import get_settings
+from investment_bot.core.trading_policy import build_trading_policy
 from investment_bot.market_data.registry import build_default_market_data_registry
 from investment_bot.risk.controller import RiskController
 from investment_bot.services.account_service import AccountService
@@ -31,6 +32,11 @@ from investment_bot.services.visualization_service import VisualizationService
 
 
 @lru_cache
+def get_trading_policy():
+    return build_trading_policy(get_settings())
+
+
+@lru_cache
 def get_market_data_service() -> MarketDataService:
     settings = get_settings()
     return MarketDataService(
@@ -48,8 +54,8 @@ def get_paper_broker() -> PaperBroker:
         trading_fee_pct=settings.trading_fee_pct,
         slippage_pct=settings.slippage_pct,
         min_order_notional=settings.min_order_notional,
-        max_consecutive_buys=settings.max_consecutive_buys,
-        max_symbol_exposure_pct=settings.max_symbol_exposure_pct,
+        max_consecutive_buys=get_trading_policy().snapshot.max_consecutive_buys,
+        max_symbol_exposure_pct=get_trading_policy().snapshot.max_symbol_exposure_pct,
     )
 
 
