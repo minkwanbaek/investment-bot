@@ -5,7 +5,7 @@ from investment_bot.strategies.base import BaseStrategy
 
 class TrendFollowingStrategy(BaseStrategy):
     name = "trend_following"
-    min_trend_gap_pct = 0.0001  # TEST MODE: Lowered from 0.0015 (0.15%) to 0.01% for BUY proof
+    min_trend_gap_pct = 0.0015  # 0.15%
     
     # 청산 조건
     stop_loss_pct = -0.02  # -2%
