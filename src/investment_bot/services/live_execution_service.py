@@ -15,6 +15,7 @@ class LiveExecutionService:
     live_mode: str = "shadow"
     confirm_live_trading: bool = False
 
+
     def preview_order(self, symbol: str, side: str, price: float, volume: float) -> dict:
         normalized = self.exchange_rules_service.normalize_upbit_price(symbol=symbol, price=price)
         rules = self.exchange_rules_service.get_upbit_market_rules(symbol=symbol)
@@ -51,7 +52,7 @@ class LiveExecutionService:
         self.run_history_service.record(kind="live_order_preview", payload=payload)
         return payload
 
-    def submit_order(self, symbol: str, side: str, price: float, volume: float) -> dict:
+    def submit_order(self, symbol: str, side: str, price: float, volume: float, force_live: bool = False) -> dict:
         preview = self.preview_order(symbol=symbol, side=side, price=price, volume=volume)
         if self.live_mode != "live":
             return {**preview, "status": "blocked", "reason": "live_mode_disabled"}
@@ -59,6 +60,7 @@ class LiveExecutionService:
             return {**preview, "status": "blocked", "reason": "live_trading_not_confirmed"}
         if not preview["allowed"]:
             return {**preview, "status": "blocked", "reason": "order_below_exchange_rules_or_balance"}
+
         
         # 매도 시에도 최소 주문 금액 체크 (포지션 금액 기준)
         if side == "sell":

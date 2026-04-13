@@ -5,7 +5,7 @@ from investment_bot.strategies.base import BaseStrategy
 class DCAStrategy(BaseStrategy):
     name = "dca"
 
-    def generate_signal(self, candles):
+    def generate_signal(self, candles, broker=None):
         symbol = candles[-1].symbol if candles else "BTC/KRW"
         closes = [c.close for c in candles]
         if len(closes) < 8:

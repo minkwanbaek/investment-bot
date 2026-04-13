@@ -5,6 +5,7 @@ from typing import Sequence
 from investment_bot.models.market import Candle
 from investment_bot.models.signal import TradeSignal
 from investment_bot.risk.controller import RiskController
+from investment_bot.services.live_execution_service import LiveExecutionService
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.strategies.registry import REGISTERED_STRATEGIES, list_enabled_strategies
 
@@ -13,6 +14,9 @@ from investment_bot.strategies.registry import REGISTERED_STRATEGIES, list_enabl
 class TradingCycleService:
     risk_controller: RiskController
     paper_broker: PaperBroker
+    live_execution_service: LiveExecutionService | None = None
+    live_mode: str = "paper"
+    confirm_live_trading: bool = False
 
     def run(self, strategy_name: str, candles: Sequence[Candle]) -> dict:
         strategy_cls = REGISTERED_STRATEGIES.get(strategy_name)
@@ -41,7 +45,21 @@ class TradingCycleService:
             latest_price=latest_price,
         )
         self.paper_broker.mark_price(signal.symbol, latest_price)
-        broker_result = self.paper_broker.submit(review, execution_price=latest_price) if review["approved"] else None
+        
+        # live 모드일 때 live_execution_service 사용, 아니면 paper_broker 사용
+        broker_result = None
+        if review["approved"]:
+            if self.live_mode == "live" and self.confirm_live_trading and self.live_execution_service:
+                # live Execution
+                broker_result = self.live_execution_service.submit_order(
+                    symbol=signal.symbol,
+                    side=signal.action,
+                    price=latest_price,
+                    volume=review["size_scale"],
+                )
+            else:
+                # paper execution
+                broker_result = self.paper_broker.submit(review, execution_price=latest_price)
 
         return {
             "strategy": strategy_name,

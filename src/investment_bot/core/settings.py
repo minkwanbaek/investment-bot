@@ -79,8 +79,8 @@ class Settings(BaseSettings):
     ledger_path: str = "data/paper_ledger.json"
     candle_store_path: str = "data/candles.json"
     run_history_path: str = "data/run_history.json"
-    upbit_access_key: str = Field(default="", validation_alias="UPBIT_ACCESS_KEY")
-    upbit_secret_key: str = Field(default="", validation_alias="UPBIT_SECRET_KEY")
+    upbit_access_key: str = Field(default="", validation_alias="UPBIT_ACCESS_API_KEY")
+    upbit_secret_key: str = Field(default="", validation_alias="UPBIT_SECRET_API_KEY")
     live_mode: str = Field(default="shadow", validation_alias="INVESTMENT_BOT_LIVE_MODE")
     confirm_live_trading: bool = False
     trading_fee_pct: float = 0.05

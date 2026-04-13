@@ -8,7 +8,7 @@ class MeanReversionStrategy(BaseStrategy):
     buy_deviation_threshold = -0.03
     sell_deviation_threshold = 0.04
 
-    def generate_signal(self, candles):
+    def generate_signal(self, candles, broker=None):
         closes = [c.close for c in candles]
         symbol = candles[-1].symbol if candles else "BTC/KRW"
         if len(closes) < 8:

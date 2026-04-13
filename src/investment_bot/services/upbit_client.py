@@ -11,8 +11,8 @@ import httpx
 
 class UpbitClient:
     def __init__(self, access_key: str | None = None, secret_key: str | None = None, base_url: str = "https://api.upbit.com"):
-        self.access_key = access_key or os.getenv("UPBIT_ACCESS_KEY", "")
-        self.secret_key = secret_key or os.getenv("UPBIT_SECRET_KEY", "")
+        self.access_key = access_key or os.getenv("UPBIT_ACCESS_API_KEY", "")
+        self.secret_key = secret_key or os.getenv("UPBIT_SECRET_API_KEY", "")
         self.base_url = base_url.rstrip("/")
 
     def configured(self) -> bool:
