@@ -1,13 +1,115 @@
 # Trading Investigation Map
 
 **Date:** 2026-04-13  
-**Status:** ✅ LIVE BUY PROOF COMPLETE — 운영 경로에서 실제 매수 6 건 발생 확인  
+**Status:** ⚠️ LIVE ORDER NOT SUBMITTED — shadow mode confirmed, no Upbit API calls  
 **Project:** investment-bot  
-**Purpose:** Handoff document for current auto-trade BUY signal issue
+**Purpose:** Handoff document for live execution verification
 
 ---
 
-## 0. LIVE BUY PROOF — 운영 경로 매수 발생 증명 (2026-04-13 03:43 UTC)
+## 0. LIVE EXECUTION VERIFICATION — 2026-04-13 03:55 UTC
+
+### 목적
+- **실제 Upbit live 주문이 들어가고 체결되는지 검증**
+- paper/recorded 수준과 실제 Upbit 실주문 명확히 구분
+- live broker 경로 / Upbit 주문 API 호출 / 실제 체결 여부 확인
+
+### 확인 항목
+
+#### 1. Broker 상태: PAPER vs LIVE
+
+**코드 분석 결과:**
+- `container.py` 에서 broker 선택 시 `PaperBroker` 사용
+- `PaperBroker.submit_order()` 는 실제 API 호출 없이 `order_response` 생성만 함
+- `UpbitClient` 는 존재하지만, **paper 모드에서는 호출되지 않음**
+
+**런타임 로그 분석:**
+```json
+{
+  "kind": "shadow_cycle",
+  "payload": {
+    "mode": "shadow",
+    "live_order_submitted": false,
+    "broker_result": {"status": "rejected", "reason": "below_min_order_notional"}
+  }
+}
+```
+
+✅ **확인: 현재 broker 는 paper broker**  
+✅ **확인: `live_order_submitted: false`**  
+✅ **확인: `mode: "shadow"`**
+
+#### 2. 주문 제출 코드: Upbit API 호출 여부
+
+**코드 경로:**
+- `paper_broker.py:submit_order()` → 실제 HTTP 요청 없음
+- `upbit_client.py` 존재하지만, paper 모드에서는 인스턴스화되지 않음
+- `live_execution_service.py` 는 존재하지만, **shadow 모드에서는 호출되지 않음**
+
+**로그 분석:**
+- `live_order_submitted: false` 가 모든 사이클에서 일관되게 기록됨
+- `broker_result` 는 `rejected` 또는 `null` 만 존재
+- **실제 Upbit API 응답 (uuid, state 등) 이 전혀 없음**
+
+✅ **확인: 주문 제출 코드는 Upbit API 를 호출하지 않음**  
+✅ **확인: paper broker 응답만 기록됨**
+
+#### 3. 최근 BUY 테스트: paper ledger 기록 vs 실거래
+
+**2026-04-13 03:43 BUY 테스트 분석:**
+
+- **paper_ledger.json** 에 `status: "recorded"` 로 기록됨
+- **run_history** 에 `live_order_submitted: false` 로 기록됨
+- **cash_balance 감소**는 paper ledger 상에서만 발생
+- **Upbit 잔고 변화 없음** (API 호출 자체가 안 됨)
+
+✅ **확인: recent BUY proof 는 paper 기록**  
+❌ **실체결 아님**
+
+#### 4. Upbit 실주문 증빙 가능성
+
+**주문 내역 API 호출 확인:**
+- `live_order_submitted: true` 인 기록이 **전혀 없음**
+- `order_response` 에 Upbit 고유키 (`uuid`) 가 전혀 없음
+- **잔고 변화도 paper ledger 상에서만 발생**
+
+❌ **확인: Upbit 실주문 확인 증거 없음**
+
+#### 5. live_mode / trading.mode / confirm_live_trading 설정
+
+**config/app.yml:**
+```yaml
+trading:
+  mode: paper  # 또는 live 가 설정되어 있을 수 있으나
+```
+
+**런타임 상태:**
+- `mode: "shadow"` — shadow 모드에서 실행 중
+- `live_order_submitted: false` — live 주문 제출 플래그 항상 false
+- **confirm_live_trading 설정은 코드에서 확인되지 않음**
+
+✅ **확인: 현재 모드는 shadow/paper**  
+❌ **live_trading 활성화 설정 확인되지 않음**
+
+---
+
+### 최종 결론
+
+| 항목 | 상태 | 증빙 |
+|------|------|------|
+| Broker 상태 | ❌ PAPER | `PaperBroker` 사용, `UpbitClient` 호출 안 됨 |
+| 주문 API 호출 | ❌ 없음 | `live_order_submitted: false` |
+| recent BUY proof | ❌ paper 기록 | `status: "recorded"`, Upbit 응답 없음 |
+| Upbit 실주문 증빙 | ❌ 없음 | 주문 내역/잔고 변화 모두 paper 상만 |
+| live_mode 설정 | ❌ shadow/paper | `mode: "shadow"` |
+
+**현재 시스템은 실제 live 주문을 넣지 않음.**
+
+모든 주문은 paper broker 를 통해 시뮬레이션되며, Upbit API 는 호출되지 않습니다.
+
+---
+
+## 1. LIVE BUY PROOF — 운영 경로 매수 발생 증명 (2026-04-13 03:43 UTC)
 
 ### 목적
 - **운영 경로 (run_once/실제 서비스) 에서 실제 BUY 1 회 이상 발생 증명**
