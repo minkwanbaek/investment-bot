@@ -51,6 +51,7 @@ trading:
   dynamic_symbol_top_n: 10
   starting_cash: 10000000
   min_order_notional: 5000
+  max_consecutive_buys: 5  # Raised from 3 to 5 after ultra-aggressive test diagnosis
 risk:
   max_risk_per_trade_pct: 20.0
   max_daily_loss_pct: 3.0
@@ -77,25 +78,25 @@ auto_trade:
 live:
   confirm_live_trading: true
 sideway_filter:
-  enabled: true
+  enabled: true  # Restored for production
   trend_gap_threshold: 0.0015
   range_threshold: 0.01
-  volatility_block_on_low: true
-  breakout_exception_enabled: true
-  breakout_exception_momentum_min: 0.0005
-  breakout_exception_trend_gap_ratio: 0.65
-  breakout_exception_allow_bearish_higher_tf: false
-  breakout_exception_allow_low_volatility: true
+  volatility_block_on_low: true  # Restored
+  breakout_exception_enabled: true  # Keep exception window
+  breakout_exception_momentum_min: 0.001  # Strengthened: 0.1% minimum
+  breakout_exception_trend_gap_ratio: 0.8  # Strengthened: 80% of threshold
+  breakout_exception_allow_bearish_higher_tf: false  # Restored
+  breakout_exception_allow_low_volatility: true  # Keep: low vol is normal now
 strategy_route:
   trend_strategy_allowed_regimes:
   - uptrend
   - downtrend
   range_strategy_allowed_regimes:
   - ranging
-  uncertain_block_enabled: true
+  uncertain_block_enabled: true  # Restored
 risk_control:
   higher_tf_bias_filter_enabled: false
-  high_volatility_defense_enabled: true
+  high_volatility_defense_enabled: true  # Restored
   time_blacklist_filter_enabled: false
   blocked_hours:
   - 0
