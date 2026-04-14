@@ -344,7 +344,13 @@ class AutoTradeService:
 
     def _handle_buy(self, chosen: dict, krw_cash: float, account: dict) -> dict:
         if krw_cash < self.settings.auto_trade_min_krw_balance:
-            result = {"status": "skipped", "reason": "insufficient_krw_balance", "krw_cash": krw_cash, "required_min_krw": self.settings.auto_trade_min_krw_balance, "chosen": chosen}
+            result = {
+                "status": "skipped",
+                "reason": "insufficient_krw_balance",
+                "krw_cash": krw_cash,
+                "required_min_krw": self.settings.auto_trade_min_krw_balance,
+                "chosen": chosen,
+            }
             return self._remember(result, record_kind="auto_trade_skip")
         current_exposure = sum(float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0) for asset in account.get("assets", []))
         total_equity = krw_cash + current_exposure
@@ -367,7 +373,17 @@ class AutoTradeService:
                 current_exposure,
                 max_total_exposure_value,
             )
-            result = {"status": "skipped", "reason": "below_meaningful_order_notional_or_total_exposure_limit", "blocker": blocker, "target_notional": round(target_notional, 4), "remaining_exposure_room": round(remaining_exposure_room, 4), "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional, "current_exposure": round(current_exposure, 4), "max_total_exposure_value": round(max_total_exposure_value, 4), "chosen": chosen}
+            result = {
+                "status": "skipped",
+                "reason": "below_meaningful_order_notional_or_total_exposure_limit",
+                "blocker": blocker,
+                "target_notional": round(target_notional, 4),
+                "remaining_exposure_room": round(remaining_exposure_room, 4),
+                "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
+                "current_exposure": round(current_exposure, 4),
+                "max_total_exposure_value": round(max_total_exposure_value, 4),
+                "chosen": chosen,
+            }
             return self._remember(result, record_kind="auto_trade_skip")
         price = chosen["latest_price"]
         volume = round(target_notional / price, 8)
@@ -411,12 +427,23 @@ class AutoTradeService:
             return self._remember(result, record_kind="auto_trade_skip")
         available_volume = float(asset.get("balance", 0.0))
         if available_volume <= 0:
-            result = {"status": "skipped", "reason": "insufficient_asset_balance", "chosen": chosen}
+            result = {
+                "status": "skipped",
+                "reason": "insufficient_asset_balance",
+                "available_volume": available_volume,
+                "chosen": chosen,
+            }
             return self._remember(result, record_kind="auto_trade_skip")
         sell_ratio = float(chosen["override"].get("sell_ratio", 1.0)) if chosen["override"] is not None else min(max(chosen["confidence"], 0.25), 1.0)
         volume = round(available_volume * sell_ratio, 8)
         if volume <= 0:
-            result = {"status": "skipped", "reason": "sell_volume_zero_after_sizing", "chosen": chosen}
+            result = {
+                "status": "skipped",
+                "reason": "sell_volume_zero_after_sizing",
+                "available_volume": available_volume,
+                "sell_ratio": sell_ratio,
+                "chosen": chosen,
+            }
             return self._remember(result, record_kind="auto_trade_skip")
         return self._submit_trade(symbol=chosen["symbol"], action="sell", price=chosen["latest_price"], volume=volume, shadow=chosen["shadow"], override=chosen["override"], extra={"chosen": chosen})
 

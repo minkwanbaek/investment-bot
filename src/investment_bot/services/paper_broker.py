@@ -132,9 +132,23 @@ class PaperBroker:
         total_buy_cost = round(notional_value + fee_paid, 4)
 
         if action == "buy" and notional_value < self.min_order_notional:
-            return {"status": "rejected", "reason": "below_min_order_notional", "min_order_notional": self.min_order_notional}
+            return {
+                "status": "rejected",
+                "reason": "below_min_order_notional",
+                "min_order_notional": self.min_order_notional,
+                "notional": notional_value,
+                "action": action,
+                "symbol": symbol,
+            }
         if action == "sell" and notional_value < self.min_order_notional:
-            return {"status": "rejected", "reason": "below_min_order_notional", "min_order_notional": self.min_order_notional}
+            return {
+                "status": "rejected",
+                "reason": "below_min_order_notional",
+                "min_order_notional": self.min_order_notional,
+                "notional": notional_value,
+                "action": action,
+                "symbol": symbol,
+            }
         if action == "buy" and self.consecutive_buys >= self.max_consecutive_buys:
             return {
                 "status": "rejected",
@@ -148,7 +162,14 @@ class PaperBroker:
                 ).as_dict(),
             }
         if action == "buy" and total_buy_cost > self.cash_balance:
-            return {"status": "rejected", "reason": "insufficient_cash", "cash_balance": self.cash_balance}
+            return {
+                "status": "rejected",
+                "reason": "insufficient_cash",
+                "cash_balance": self.cash_balance,
+                "required": total_buy_cost,
+                "action": action,
+                "symbol": symbol,
+            }
         if action == "buy":
             current_position_value = self.positions.get(symbol, {}).get("quantity", 0.0) * requested_price
             max_symbol_exposure_value = self.starting_cash * (self.max_symbol_exposure_pct / 100)
@@ -236,11 +257,24 @@ class PaperBroker:
             # Upbit 최소 주문 금액 체크 (5,000 원)
             current_position_value = position["quantity"] * executed_price
             if current_position_value < self.min_order_notional:
-                return {"status": "rejected", "reason": "below_min_order_notional", "min_order_notional": self.min_order_notional}
+                return {
+                    "status": "rejected",
+                    "reason": "below_min_order_notional",
+                    "min_order_notional": self.min_order_notional,
+                    "position_value": current_position_value,
+                    "action": action,
+                    "symbol": symbol,
+                }
             
             sell_quantity = min(approved_size, position["quantity"])
             if sell_quantity <= 0:
-                return {"status": "rejected", "reason": "no_position_to_sell", "symbol": symbol}
+                return {
+                    "status": "rejected",
+                    "reason": "no_position_to_sell",
+                    "symbol": symbol,
+                    "action": action,
+                    "position_qty": position["quantity"],
+                }
             average_price_before_sell = position["average_price"]
             realized_pnl = ((executed_price - average_price_before_sell) * sell_quantity) - fee_paid
             position["quantity"] = self._round_qty(position["quantity"] - sell_quantity)
