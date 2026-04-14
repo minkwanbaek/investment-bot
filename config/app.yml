@@ -137,3 +137,6 @@ strategies:
     enabled: true
   dca:
     enabled: true
+max_consecutive_buys: 10
+meaningful_order_notional: 5000
+dynamic_symbol_selection: true

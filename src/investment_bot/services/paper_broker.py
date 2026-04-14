@@ -233,6 +233,11 @@ class PaperBroker:
                     )
                 )
         elif action == "sell":
+            # Upbit 최소 주문 금액 체크 (5,000 원)
+            current_position_value = position["quantity"] * executed_price
+            if current_position_value < self.min_order_notional:
+                return {"status": "rejected", "reason": "below_min_order_notional", "min_order_notional": self.min_order_notional}
+            
             sell_quantity = min(approved_size, position["quantity"])
             if sell_quantity <= 0:
                 return {"status": "rejected", "reason": "no_position_to_sell", "symbol": symbol}

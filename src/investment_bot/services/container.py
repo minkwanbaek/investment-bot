@@ -71,9 +71,13 @@ def get_risk_controller() -> RiskController:
 
 @lru_cache
 def get_trading_cycle_service() -> TradingCycleService:
+    settings = get_settings()
     return TradingCycleService(
         risk_controller=get_risk_controller(),
         paper_broker=get_paper_broker(),
+        live_execution_service=get_live_execution_service(),
+        live_mode=settings.live_mode,
+        confirm_live_trading=settings.confirm_live_trading,
     )
 
 
@@ -189,11 +193,15 @@ def get_fail_safe_service() -> FailSafeService:
 
 @lru_cache
 def get_shadow_service() -> ShadowService:
+    settings = get_settings()
     return ShadowService(
         semi_live_service=get_semi_live_service(),
         run_history_service=get_run_history_service(),
         upbit_client=get_upbit_client(),
         account_service=get_account_service(),
+        live_execution_service=get_live_execution_service(),
+        live_mode=settings.live_mode,
+        confirm_live_trading=settings.confirm_live_trading,
     )
 
 

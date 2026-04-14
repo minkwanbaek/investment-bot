@@ -7,6 +7,7 @@ from investment_bot.core.trading_policy import build_trading_policy
 from investment_bot.models.market import Candle
 from investment_bot.models.signal import TradeSignal
 from investment_bot.risk.controller import RiskController
+from investment_bot.services.live_execution_service import LiveExecutionService
 from investment_bot.services.market_regime_classifier import MarketRegimeClassifier
 from investment_bot.services.paper_broker import PaperBroker
 from investment_bot.strategies.registry import REGISTERED_STRATEGIES, list_enabled_strategies
@@ -16,6 +17,9 @@ from investment_bot.strategies.registry import REGISTERED_STRATEGIES, list_enabl
 class TradingCycleService:
     risk_controller: RiskController
     paper_broker: PaperBroker
+    live_execution_service: LiveExecutionService | None = None
+    live_mode: str = "paper"
+    confirm_live_trading: bool = False
 
     def run(self, strategy_name: str, candles: Sequence[Candle]) -> dict:
         strategy_cls = REGISTERED_STRATEGIES.get(strategy_name)
@@ -95,12 +99,26 @@ class TradingCycleService:
         review["higher_tf_bias"] = market_info.get("higher_tf_bias", "neutral")
 
         self.paper_broker.mark_price(signal.symbol, latest_price)
-        if review["approved"] and review.get("force_exit") and review["action"] == "sell":
-            position_qty = float(self.paper_broker.positions.get(signal.symbol, {}).get("quantity", 0.0) or 0.0)
-            review["size_scale"] = position_qty
-            review["target_notional"] = round(position_qty * latest_price, 4)
 
-        broker_result = self.paper_broker.submit(review, execution_price=latest_price) if review["approved"] else None
+        # Handle force_exit and live/paper execution
+        broker_result = None
+        if review["approved"]:
+            # Handle force_exit for sell orders
+            if review.get("force_exit") and review["action"] == "sell":
+                position_qty = float(self.paper_broker.positions.get(signal.symbol, {}).get("quantity", 0.0) or 0.0)
+                review["size_scale"] = position_qty
+                review["target_notional"] = round(position_qty * latest_price, 4)
+
+            # Live or paper execution
+            if self.live_mode == "live" and self.confirm_live_trading and self.live_execution_service:
+                broker_result = self.live_execution_service.submit_order(
+                    symbol=signal.symbol,
+                    side=signal.action,
+                    price=latest_price,
+                    volume=review["size_scale"],
+                )
+            else:
+                broker_result = self.paper_broker.submit(review, execution_price=latest_price)
 
         return {
             "strategy": strategy_name,

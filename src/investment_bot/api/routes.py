@@ -14,7 +14,10 @@ from investment_bot.services.live_deploy_checklist_service import LiveDeployChec
 from investment_bot.services.metrics_service import MetricsService
 from investment_bot.strategies.registry import list_enabled_strategies, list_registered_strategies
 
+from .dashboard import router as dashboard_router
+
 router = APIRouter()
+router.include_router(dashboard_router)
 
 
 @router.get("/")
@@ -596,3 +599,24 @@ def profit_structure_visualization(limit: int = 50) -> dict:
 @router.post("/runs/reset")
 def reset_runs() -> dict:
     return get_run_history_service().reset()
+
+
+# Auto-trade endpoints
+@router.get("/auto-trade/status")
+def auto_trade_status() -> dict:
+    return get_auto_trade_service().status()
+
+
+@router.post("/auto-trade/run-once")
+def auto_trade_run_once() -> dict:
+    return get_auto_trade_service().run_once()
+
+
+@router.post("/auto-trade/start")
+def auto_trade_start() -> dict:
+    return get_auto_trade_service().start()
+
+
+@router.post("/auto-trade/stop")
+def auto_trade_stop() -> dict:
+    return get_auto_trade_service().stop()

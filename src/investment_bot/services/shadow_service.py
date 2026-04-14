@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import time
 
 from investment_bot.services.account_service import AccountService
+from investment_bot.services.live_execution_service import LiveExecutionService
 from investment_bot.services.run_history_service import RunHistoryService
 from investment_bot.services.semi_live_service import SemiLiveService
 from investment_bot.services.upbit_client import UpbitClient
@@ -15,6 +16,9 @@ class ShadowService:
     account_service: AccountService | None = None
     _balances_cache: list | None = None
     _account_cache: dict | None = None
+    live_execution_service: LiveExecutionService | None = None
+    live_mode: str = "shadow"
+    confirm_live_trading: bool = False
 
     def _get_cached_balances(self) -> list:
         if self._balances_cache is None:
@@ -64,8 +68,30 @@ class ShadowService:
             "shadow_service.run_once | symbol=%s strategy=%s cache_bal=%.3fs cache_acct=%.3fs sync_pos=%.3fs semi_live=%.3fs total=%.3fs",
             symbol, strategy_name, t1-t0, t2-t1, t3-t2, t4-t3, t4-t0,
         )
+        account_summary = self.account_service.summarize_upbit_balances() if self.account_service else None
+        
+        # live 모드에서 실제 주문 제출 여부 확인
+        live_order_submitted = False
+        if self.live_mode == "live" and self.confirm_live_trading and self.live_execution_service and semi_live_result:
+            # live_execution_service 를 통해 실제 주문 제출
+            signal = semi_live_result.get("signal", {})
+            if signal.get("action") in ("buy", "sell") and signal.get("approved_size", 0) > 0:
+                preview = self.live_execution_service.preview_order(
+                    symbol=signal.get("symbol", symbol),
+                    side=signal.get("action"),
+                    price=semi_live_result.get("latest_price", 0),
+                    volume=signal.get("approved_size", 0),
+                )
+                if preview.get("would_submit_live"):
+                    result = self.live_execution_service.submit_order(
+                        symbol=signal.get("symbol", symbol),
+                        side=signal.get("action"),
+                        price=semi_live_result.get("latest_price", 0),
+                        volume=signal.get("approved_size", 0),
+                    )
+                    live_order_submitted = result.get("status") == "submitted"
         payload = {
-            "mode": "shadow",
+            "mode": self.live_mode,
             "strategy_name": strategy_name,
             "symbol": symbol,
             "timeframe": timeframe,
@@ -75,10 +101,10 @@ class ShadowService:
             "exchange_balances": balances,
             "exchange_account_summary": account_summary,
             "decision": semi_live_result,
-            "live_order_submitted": False,
+            "live_order_submitted": live_order_submitted,
         }
         self.run_history_service.record(kind="shadow_cycle", payload={
-            "mode": "shadow",
+            "mode": self.live_mode,
             "strategy_name": strategy_name,
             "symbol": symbol,
             "timeframe": timeframe,
@@ -86,6 +112,6 @@ class ShadowService:
             "exchange_balance_count": len(balances),
             "exchange_account_summary": account_summary,
             "decision": semi_live_result,
-            "live_order_submitted": False,
+            "live_order_submitted": live_order_submitted,
         })
         return payload
