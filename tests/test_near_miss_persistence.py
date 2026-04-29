@@ -45,7 +45,7 @@ def test_run_history_persists_near_miss_signal_meta(tmp_path):
     assert meta["is_near_miss"] is True
     assert meta["category"] == "threshold"
     assert meta["stage"] == "route_filter"
-    assert meta["block_reason"] == "trend_strategy_route_blocked"
+    assert meta["block_reason"] == "sideway_filter_blocked"
 
 
 def test_executor_cycle_payload_can_store_result_level_near_miss(tmp_path):

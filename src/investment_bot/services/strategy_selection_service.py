@@ -25,8 +25,8 @@ class StrategySelectionService:
             return []
         if symbol == "ETH/KRW":
             if normalized_regime in {"trend_up", "trend_down"}:
-                return ["trend_following"]
-            if normalized_regime in {"trend_down", "uncertain"}:
+                return ["trend_following", "mean_reversion"] if normalized_regime == "trend_down" else ["trend_following"]
+            if normalized_regime == "uncertain":
                 return ["mean_reversion"]
             if normalized_regime == "sideways":
                 return ["trend_following", "mean_reversion"]

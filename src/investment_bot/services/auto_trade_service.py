@@ -142,12 +142,20 @@ class AutoTradeService:
 
         sell_candidates = [c for c in candidates if c["action"] == "sell"]
         if sell_candidates:
-            # Filter out dust SELL candidates early to reduce noise and let BUY candidates be evaluated
+            # Filter out unmanaged dust SELL candidates early to reduce noise and let BUY candidates be evaluated.
+            # Managed positions and protective overrides must still reach _handle_sell(), even when the order
+            # notional is below the buy-side meaningful-order threshold.
             non_dust_sells = []
             for c in sell_candidates:
                 asset = c.get("asset", {})
                 estimated_value = float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
-                if estimated_value >= self.settings.auto_trade_meaningful_order_notional:
+                near_managed_threshold = self.settings.auto_trade_min_managed_position_notional * 0.95
+                if (
+                    c.get("override") is not None
+                    or asset.get("managed") is True
+                    or estimated_value >= self.settings.auto_trade_meaningful_order_notional
+                    or estimated_value >= near_managed_threshold
+                ):
                     non_dust_sells.append(c)
             if non_dust_sells:
                 chosen = max(non_dust_sells, key=lambda c: (1 if c["override"] else 0, c["score"]))
@@ -162,11 +170,30 @@ class AutoTradeService:
             logger.info("buy candidate chosen | symbol=%s score=%.4f confidence=%.4f", chosen["symbol"], chosen["score"], chosen["confidence"])
             return self._handle_buy(chosen, krw_cash=krw_cash, account=account)
 
+        top_hold_candidates = sorted(
+            [
+                {
+                    "symbol": c.get("symbol"),
+                    "strategy_name": c.get("strategy_name"),
+                    "confidence": c.get("confidence", 0.0),
+                    "score": c.get("score", 0.0),
+                    "regime": c.get("regime", {}).get("regime") if isinstance(c.get("regime"), dict) else c.get("regime"),
+                }
+                for c in candidates
+                if c.get("action") == "hold"
+            ],
+            key=lambda c: (float(c.get("confidence", 0.0) or 0.0), float(c.get("score", 0.0) or 0.0)),
+            reverse=True,
+        )[:5]
+        if top_hold_candidates:
+            logger.info("top_hold_candidates | candidates=%s", top_hold_candidates)
+
         logger.info("run_once skipped: non_actionable_signal | %d candidates evaluated elapsed=%.2fs", len(candidates), time.time() - t0)
         result = {
             "status": "skipped",
             "reason": "non_actionable_signal",
             "candidates": candidates,
+            "top_hold_candidates": top_hold_candidates,
             "evaluated_symbols": batch_symbols,
             "batch_size": len(batch_symbols),
             "total_symbols": len(symbols),
@@ -424,23 +451,6 @@ class AutoTradeService:
                 "reason": "below_min_managed_position_notional",
                 "managed_notional": round(managed_notional, 4),
                 "min_managed_position_notional": self.settings.auto_trade_min_managed_position_notional,
-                "chosen": chosen,
-            }
-            return self._remember(result, record_kind="auto_trade_skip")
-        # Additional dust check: skip if estimated_market_value is below meaningful order threshold
-        estimated_value = float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
-        if estimated_value > 0 and estimated_value < self.settings.auto_trade_meaningful_order_notional:
-            logger.info(
-                "run_once skipped: dust_position_sell_noise | symbol=%s estimated_value=%.4f meaningful_order_notional=%.4f",
-                chosen["symbol"],
-                estimated_value,
-                self.settings.auto_trade_meaningful_order_notional,
-            )
-            result = {
-                "status": "skipped",
-                "reason": "dust_position_sell_noise",
-                "estimated_value": round(estimated_value, 4),
-                "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
                 "chosen": chosen,
             }
             return self._remember(result, record_kind="auto_trade_skip")

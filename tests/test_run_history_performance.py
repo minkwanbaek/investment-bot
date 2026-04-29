@@ -85,7 +85,7 @@ class TestRunHistoryStorePerformance:
         
         store = RunHistoryStore(path=str(tmp_path / "run_history.json"))
         store.history_dir = history_dir
-        store._perf_log_threshold_sec = 0.001  # Very low threshold for testing
+        store._perf_log_threshold_sec = 0.0  # Force warning path without relying on filesystem timing
         
         with caplog.at_level(logging.WARNING):
             store.append("test", {"data": "value"})

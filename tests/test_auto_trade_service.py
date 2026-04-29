@@ -225,7 +225,7 @@ def test_trading_cycle_classifies_market_context_fields():
 
     market = MarketRegimeClassifier().classify(candles)
 
-    assert market['regime'] in {'uptrend', 'downtrend', 'ranging', 'mixed', 'unknown'}
+    assert market['regime'] in {'trend_up', 'trend_down', 'sideways', 'uncertain'}
     assert market['volatility_state'] in {'low', 'normal', 'high'}
     assert market['higher_tf_bias'] in {'bullish', 'bearish', 'neutral'}
 
@@ -253,7 +253,7 @@ def test_market_regime_classifier_returns_expected_shape():
         )
 
     result = MarketRegimeClassifier().classify(candles)
-    assert result['regime'] in {'uptrend', 'downtrend', 'ranging', 'mixed', 'unknown'}
+    assert result['regime'] in {'trend_up', 'trend_down', 'sideways', 'uncertain'}
     assert result['volatility_state'] in {'low', 'normal', 'high'}
     assert result['higher_tf_bias'] in {'bullish', 'bearish', 'neutral'}
     assert 'trend_gap_pct' in result
@@ -296,6 +296,7 @@ def test_risk_controller_blocks_buy_on_bearish_higher_tf_bias(monkeypatch):
     get_settings.cache_clear()
     settings = get_settings()
     monkeypatch.setattr(settings, 'blocked_hours', [])
+    monkeypatch.setattr(settings, 'higher_tf_bias_filter_enabled', True)
     signal = TradeSignal(strategy_name='trend_following', symbol='BTC/KRW', action='buy', confidence=0.8, reason='test')
     signal.meta = {'higher_tf_bias': 'bearish', 'volatility_state': 'normal', 'losing_streak': 0}
     review = RiskController(min_order_notional=5000, base_entry_notional=10000).review(signal, cash_balance=100000, latest_price=10000)
