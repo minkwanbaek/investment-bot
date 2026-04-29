@@ -203,7 +203,12 @@ class Settings(BaseSettings):
     standard_backtest_fee_model: str = "paper_broker_fee_pct"
     standard_backtest_slippage_model: str = "paper_broker_slippage_pct"
 
-    model_config = SettingsConfigDict(env_prefix="INVESTMENT_BOT_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="INVESTMENT_BOT_",
+        env_file=".env",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
 
 @lru_cache

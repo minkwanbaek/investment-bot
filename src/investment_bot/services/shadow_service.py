@@ -55,13 +55,21 @@ class ShadowService:
             )
         t3 = time.time()
         
-        semi_live_result = self.semi_live_service.run_once(
-            strategy_name=strategy_name,
-            symbol=symbol,
-            timeframe=timeframe,
-            limit=limit,
-            candles=candles,
-        )
+        try:
+            semi_live_result = self.semi_live_service.run_once(
+                strategy_name=strategy_name,
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=limit,
+                candles=candles,
+            )
+        except TypeError:
+            semi_live_result = self.semi_live_service.run_once(
+                strategy_name=strategy_name,
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=limit,
+            )
         t4 = time.time()
         
         logger.debug(

@@ -2,7 +2,7 @@ app:
   name: investment-bot
   environment: local
 trading:
-  mode: live
+  mode: paper
   base_currency: KRW
   symbols:
   - BTC/KRW
@@ -53,11 +53,11 @@ trading:
   min_order_notional: 5000
   max_consecutive_buys: 5  # Raised from 3 to 5 after ultra-aggressive test diagnosis
 risk:
-  max_risk_per_trade_pct: 20.0
+  max_risk_per_trade_pct: 1.0
   max_daily_loss_pct: 3.0
   max_drawdown_pct: 10.0
 auto_trade:
-  enabled: true
+  enabled: false
   symbol: BTC/KRW
   strategy_name: trend_following
   timeframe: 5m
@@ -76,7 +76,7 @@ auto_trade:
   max_total_exposure_pct: 80.0
   min_managed_position_notional: 1500.0
 live:
-  confirm_live_trading: true
+  confirm_live_trading: false
 sideway_filter:
   enabled: true  # Restored for production
   trend_gap_threshold: 0.0015

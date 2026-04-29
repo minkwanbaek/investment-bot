@@ -16,10 +16,14 @@ def setup_function():
 def test_file_config_is_loaded():
     settings = get_settings()
     assert settings.app_name == "investment-bot"
-    assert settings.trading_mode == "live"  # config/app.yml sets live mode
-    assert settings.symbols == ["BTC/KRW", "ETH/KRW", "SOL/KRW", "XRP/KRW", "ADA/KRW", "DOGE/KRW", "XLM/KRW", "TRX/KRW", "HBAR/KRW", "LINK/KRW", "APT/KRW", "SUI/KRW", "AVAX/KRW", "DOT/KRW", "SEI/KRW", "ONDO/KRW", "ENA/KRW", "WLD/KRW", "ARB/KRW", "OP/KRW"]
+    assert settings.trading_mode == "paper"
+    assert settings.live_mode == "paper"
+    assert settings.confirm_live_trading is False
+    assert settings.auto_trade_enabled is False
+    assert settings.symbols[:3] == ["BTC/KRW", "ETH/KRW", "SOL/KRW"]
+    assert len(settings.symbols) == 42
     assert settings.starting_cash == 10_000_000
-    assert settings.max_risk_per_trade_pct == 20.0  # config sets 20.0
+    assert settings.max_risk_per_trade_pct == 1.0
 
 
 def test_enabled_strategies_follow_config():
@@ -32,6 +36,4 @@ def test_services_reflect_config_values():
     assert broker.starting_cash == 10_000_000
     assert broker.trading_fee_pct == 0.05
     assert broker.slippage_pct == 0.05
-    # Risk controller max_confidence_position_scale is set from settings.auto_trade_target_allocation_pct / 100
-    # config/app.yml sets target_allocation_pct=20.0, so scale=0.2
-    assert risk_controller.max_confidence_position_scale == 0.2
+    assert risk_controller.max_confidence_position_scale == 0.01

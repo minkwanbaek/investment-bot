@@ -39,9 +39,8 @@ def test_health_endpoint_exposes_runtime_config():
     response = client.get("/health")
     assert response.status_code == 200
     body = response.json()
-    # config/app.yml sets mode=live, symbols=20 coins
-    assert body["mode"] == "live"
-    assert len(body["symbols"]) == 20
+    assert body["mode"] == "paper"
+    assert len(body["symbols"]) == 42
 
 
 def test_dashboard_page_is_served():

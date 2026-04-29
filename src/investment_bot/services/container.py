@@ -60,6 +60,11 @@ def get_paper_broker() -> PaperBroker:
 
 
 @lru_cache
+def get_ledger_store() -> LedgerStore:
+    return LedgerStore(get_settings().ledger_path)
+
+
+@lru_cache
 def get_risk_controller() -> RiskController:
     settings = get_settings()
     return RiskController(

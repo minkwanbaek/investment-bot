@@ -15,6 +15,7 @@ dependencies = [
   "pydantic-settings",
   "pyyaml",
   "httpx",
+  "PyJWT",
 ]
 
 [project.optional-dependencies]

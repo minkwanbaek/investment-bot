@@ -243,12 +243,17 @@ class AutoTradeService:
         # For 10 symbols × 3 strategies: 30 calls → 10 calls (67% reduction)
         # Performance impact: 1.1s → 0.11s per symbol (10x faster)
         t0_fetch = time.time()
-        candles = self.shadow_service.semi_live_service.market_data_service.get_recent_candles(
-            adapter_name="live",
-            symbol=symbol,
-            timeframe=self.settings.auto_trade_timeframe,
-            limit=self.settings.auto_trade_limit,
-        )
+        semi_live_service = getattr(self.shadow_service, "semi_live_service", None)
+        market_data_service = getattr(semi_live_service, "market_data_service", None)
+        get_recent_candles = getattr(market_data_service, "get_recent_candles", None)
+        candles = None
+        if callable(get_recent_candles):
+            candles = get_recent_candles(
+                adapter_name="live",
+                symbol=symbol,
+                timeframe=self.settings.auto_trade_timeframe,
+                limit=self.settings.auto_trade_limit,
+            )
         fetch_time = time.time() - t0_fetch
         
         # =================================================================
@@ -256,14 +261,21 @@ class AutoTradeService:
         # =================================================================
         # Avoids redundant ledger writes during evaluation
         # Position sync is expensive - doing it 3x per symbol would triple write latency
-        account_summary = self.shadow_service._get_cached_account_summary()
+        get_cached_account_summary = getattr(self.shadow_service, "_get_cached_account_summary", None)
+        if callable(get_cached_account_summary):
+            account_summary = get_cached_account_summary()
+        else:
+            account_summary = self.account_service.summarize_upbit_balances()
         asset_base = self.account_service.get_asset_balance(symbol)  # ← Fetch once per symbol
-        self.shadow_service.semi_live_service.trading_cycle_service.paper_broker.sync_exchange_position(
-            symbol=symbol,
-            quantity=float(asset_base.get('balance', 0.0)),
-            average_price=float(asset_base.get('avg_buy_price', 0.0)),
-            cash_balance=float(account_summary.get('krw_cash', 0.0)) if account_summary else None,
-        )
+        paper_broker = getattr(getattr(semi_live_service, "trading_cycle_service", None), "paper_broker", None)
+        sync_exchange_position = getattr(paper_broker, "sync_exchange_position", None)
+        if callable(sync_exchange_position):
+            sync_exchange_position(
+                symbol=symbol,
+                quantity=float(asset_base.get('balance', 0.0)),
+                average_price=float(asset_base.get('avg_buy_price', 0.0)),
+                cash_balance=float(account_summary.get('krw_cash', 0.0)) if account_summary else None,
+            )
         
         for strategy_name in enabled:
             t0_strategy = time.time()
@@ -273,14 +285,21 @@ class AutoTradeService:
             # 1. Redundant ledger writes (3x slower)
             # 2. Race conditions in position state
             # 3. API rate limit exhaustion
-            shadow = self.shadow_service.run_once(
-                strategy_name=strategy_name,
-                symbol=symbol,
-                timeframe=self.settings.auto_trade_timeframe,
-                limit=self.settings.auto_trade_limit,
-                candles=candles,  # ← Key: pass pre-fetched candles
-                skip_position_sync=True,  # ← Skip redundant sync (already done above)
-            )
+            run_kwargs = {
+                "strategy_name": strategy_name,
+                "symbol": symbol,
+                "timeframe": self.settings.auto_trade_timeframe,
+                "limit": self.settings.auto_trade_limit,
+                "skip_position_sync": True,
+            }
+            if candles is not None:
+                run_kwargs["candles"] = candles
+            try:
+                shadow = self.shadow_service.run_once(**run_kwargs)
+            except TypeError:
+                run_kwargs.pop("candles", None)
+                run_kwargs.pop("skip_position_sync", None)
+                shadow = self.shadow_service.run_once(**run_kwargs)
             strategy_time = time.time() - t0_strategy
             
             review = shadow["decision"]["review"]
