@@ -120,7 +120,8 @@ class PaperBroker:
             self.cash_balance = round(max(cash_balance, 0.0), 4)
         self._persist_state()
 
-    def submit(self, reviewed_signal: dict, execution_price: float) -> dict:
+    def submit(self, reviewed_signal: dict, execution_price: float, now: datetime | None = None) -> dict:
+        now = now or datetime.now(timezone.utc)
         action = reviewed_signal["action"]
         approved_size = reviewed_signal["size_scale"]
         symbol = reviewed_signal.get("symbol", "BTC/KRW")
@@ -224,7 +225,7 @@ class PaperBroker:
             new_quantity = position["quantity"] + approved_size
             position["quantity"] = self._round_qty(new_quantity)
             position["average_price"] = round(total_cost / new_quantity, 4) if new_quantity else 0.0
-            position["opened_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            position["opened_at"] = now.isoformat().replace("+00:00", "Z")
             settings = get_settings()
             if settings.atr_stop_enabled:
                 stop_distance = executed_price * 0.01 * settings.stop_atr_multiplier
@@ -244,7 +245,7 @@ class PaperBroker:
                         strategy_version=reviewed_signal.get("strategy_version"),
                         symbol=symbol,
                         side="buy",
-                        entry_time=datetime.now(timezone.utc),
+                        entry_time=now,
                         entry_price=executed_price,
                         quantity=approved_size,
                         entry_reason=reviewed_signal["reason"],
@@ -294,7 +295,7 @@ class PaperBroker:
                     symbol=symbol,
                     side="buy",
                     updates={
-                        "exit_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "exit_time": now.isoformat().replace("+00:00", "Z"),
                         "exit_price": executed_price,
                         "gross_pnl": round((executed_price - average_price_before_sell) * sell_quantity, 4),
                         "net_pnl": round(realized_pnl, 4),
@@ -321,6 +322,11 @@ class PaperBroker:
         if settings.partial_take_profit_enabled and not position.get("tp1_done") and position.get("tp1_price") and market_price >= position["tp1_price"]:
             sell_qty = round(position["quantity"] * settings.tp1_size_pct, 8)
             position["tp1_done"] = True
+            if settings.trailing_stop_enabled:
+                position["trailing_active"] = True
+                trailing_stop = round(market_price * (1 - settings.trailing_distance_ratio), 4)
+                current = position.get("trailing_stop_price")
+                position["trailing_stop_price"] = trailing_stop if current is None else max(current, trailing_stop)
             return {"status": "triggered", "action": "sell", "reason": "partial_take_profit", "size_scale": sell_qty}
 
         gain_ratio = (market_price - average_price) / average_price

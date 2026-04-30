@@ -114,9 +114,10 @@ class AutoTradeService:
         # Use a priority + rotating-batch scheduler so top symbols are checked every cycle,
         # while the remaining symbols are covered across subsequent cycles without background threads.
         if self._scheduler is None or self._scheduler.all_symbols != list(symbols):
-            # Operational default: evaluate only top-10 symbols each cycle for responsiveness.
+            priority_count = min(len(symbols), max(1, int(self.settings.dynamic_symbol_top_n)))
+            # Operational default: evaluate the configured top-N symbols each cycle for responsiveness.
             # Remaining symbols are covered in future incremental refactors/configurable scheduling.
-            self._scheduler = AutoTradeScheduler(all_symbols=list(symbols), priority_count=10, batch_size=0)
+            self._scheduler = AutoTradeScheduler(all_symbols=list(symbols), priority_count=priority_count, batch_size=0)
 
         batch_symbols = self._scheduler.get_priority_symbols()
         self._last_selected_symbols = list(batch_symbols)
@@ -141,6 +142,7 @@ class AutoTradeService:
         )
 
         sell_candidates = [c for c in candidates if c["action"] == "sell"]
+        buy_candidates = [c for c in candidates if c["action"] == "buy"]
         if sell_candidates:
             # Filter out unmanaged dust SELL candidates early to reduce noise and let BUY candidates be evaluated.
             # Managed positions and protective overrides must still reach _handle_sell(), even when the order
@@ -150,6 +152,11 @@ class AutoTradeService:
                 asset = c.get("asset", {})
                 estimated_value = float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
                 near_managed_threshold = self.settings.auto_trade_min_managed_position_notional * 0.95
+                available_volume = float(asset.get("balance", 0.0) or 0.0)
+                full_sell_notional = float(c.get("latest_price", 0.0) or 0.0) * available_volume
+                exchange_actionable = full_sell_notional >= self.settings.min_order_notional
+                if buy_candidates and not exchange_actionable:
+                    continue
                 if (
                     c.get("override") is not None
                     or asset.get("managed") is True
@@ -164,7 +171,6 @@ class AutoTradeService:
             else:
                 logger.info("sell candidates filtered out: all dust positions below meaningful_order_notional")
 
-        buy_candidates = [c for c in candidates if c["action"] == "buy"]
         if buy_candidates:
             chosen = max(buy_candidates, key=lambda c: c["score"])
             logger.info("buy candidate chosen | symbol=%s score=%.4f confidence=%.4f", chosen["symbol"], chosen["score"], chosen["confidence"])
@@ -465,6 +471,8 @@ class AutoTradeService:
             return self._remember(result, record_kind="auto_trade_skip")
         sell_ratio = float(chosen["override"].get("sell_ratio", 1.0)) if chosen["override"] is not None else min(max(chosen["confidence"], 0.25), 1.0)
         volume = round(available_volume * sell_ratio, 8)
+        if chosen["latest_price"] * volume < self.settings.min_order_notional <= chosen["latest_price"] * available_volume:
+            volume = round(available_volume, 8)
         if volume <= 0:
             result = {
                 "status": "skipped",

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Sequence
 
 from investment_bot.core.settings import get_settings
@@ -31,12 +32,28 @@ class TradingCycleService:
         strategy = strategy_cls()
         signal: TradeSignal = strategy.generate_signal(candles, broker=self.paper_broker)
         latest_price = candles[-1].close
+        cycle_time = self._parse_candle_timestamp(candles[-1].timestamp)
         policy = build_trading_policy(get_settings())
         market_info = policy.normalize_market_info(MarketRegimeClassifier().classify(candles))
         market_regime = market_info.get("regime", "uncertain")
         
         # Near-miss observability for trend_following
         signal = self._enrich_near_miss(signal, market_info)
+        exit_rule = self.paper_broker.evaluate_exit_rules(signal.symbol, latest_price, now=cycle_time)
+        if exit_rule.get("status") == "triggered":
+            signal = TradeSignal(
+                strategy_name=signal.strategy_name,
+                symbol=signal.symbol,
+                action=exit_rule.get("action", "sell"),
+                confidence=1.0,
+                reason=f"broker_exit:{exit_rule.get('reason')}; {signal.reason}",
+                meta={
+                    **getattr(signal, "meta", {}),
+                    "force_exit": True,
+                    "exit_reason": exit_rule.get("reason"),
+                    "exit_size_scale": exit_rule.get("size_scale"),
+                },
+            )
 
         route_block_reason = self._route_block_reason(strategy_name=strategy_name, market_info=market_info)
         force_exit = bool(getattr(signal, "meta", {}).get("force_exit", False))
@@ -55,7 +72,7 @@ class TradingCycleService:
                 reason=f"market_regime=sideways; sideway_filter_blocked; {signal.reason}",
                 meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason="sideway_filter_blocked"),
             )
-        elif not force_exit and route_block_reason:
+        elif not force_exit and route_block_reason and not exception_pass:
             signal = TradeSignal(
                 strategy_name=signal.strategy_name,
                 symbol=signal.symbol,
@@ -106,8 +123,9 @@ class TradingCycleService:
             # Handle force_exit for sell orders
             if review.get("force_exit") and review["action"] == "sell":
                 position_qty = float(self.paper_broker.positions.get(signal.symbol, {}).get("quantity", 0.0) or 0.0)
-                review["size_scale"] = position_qty
-                review["target_notional"] = round(position_qty * latest_price, 4)
+                exit_size = getattr(signal, "meta", {}).get("exit_size_scale")
+                review["size_scale"] = min(float(exit_size or position_qty), position_qty)
+                review["target_notional"] = round(review["size_scale"] * latest_price, 4)
 
             # Live or paper execution
             if self.live_mode == "live" and self.confirm_live_trading and self.live_execution_service:
@@ -118,7 +136,7 @@ class TradingCycleService:
                     volume=review["size_scale"],
                 )
             else:
-                broker_result = self.paper_broker.submit(review, execution_price=latest_price)
+                broker_result = self.paper_broker.submit(review, execution_price=latest_price, now=cycle_time)
 
         return {
             "strategy": strategy_name,
@@ -141,6 +159,14 @@ class TradingCycleService:
         if strategy_name == "mean_reversion" and regime not in set(policy_snapshot.range_strategy_allowed_regimes):
             return "range_strategy_route_blocked"
         return None
+
+    def _parse_candle_timestamp(self, timestamp: str | None) -> datetime | None:
+        if not timestamp:
+            return None
+        try:
+            return datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+        except ValueError:
+            return None
 
     def _should_block_for_sideways(self, strategy_name: str, market_info: dict) -> bool:
         policy_snapshot = build_trading_policy(get_settings()).snapshot
@@ -265,4 +291,3 @@ class TradingCycleService:
         else:
             next_meta["block_reason"] = block_reason
         return next_meta
-

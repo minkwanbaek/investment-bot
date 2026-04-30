@@ -34,3 +34,14 @@ bash scripts/ops/run_prd.sh
 - Ralph works in `dev`
 - candidate changes are validated in `dev`
 - approved changes move to `prd` through git
+
+
+## Ralph execution
+```bash
+bash scripts/ops/run_ralph_loop.sh 10
+```
+
+Optional model override:
+```bash
+RALPH_CODEX_MODEL=gpt-5.4 bash scripts/ops/run_ralph_loop.sh 10
+```
