@@ -5,7 +5,11 @@ from investment_bot.strategies.base import BaseStrategy
 
 class TrendFollowingStrategy(BaseStrategy):
     name = "trend_following"
-    min_trend_gap_pct = 0.0012  # 0.12%
+    min_trend_gap_pct = 0.0015  # 0.15%
+    min_entry_momentum_pct = 0.0012  # 0.12%
+    min_entry_volume_ratio = 1.2
+    min_entry_close_location = 0.7
+    require_recent_high_breakout = True
     
     # 청산 조건
     stop_loss_pct = -0.02  # -2%
@@ -13,6 +17,7 @@ class TrendFollowingStrategy(BaseStrategy):
 
     def generate_signal(self, candles, broker=None):
         closes = [c.close for c in candles]
+        volumes = [c.volume for c in candles]
         symbol = candles[-1].symbol if candles else "BTC/KRW"
         if len(closes) < 8:
             return TradeSignal(strategy_name=self.name, symbol=symbol, action="hold", confidence=0.0, reason="insufficient data")
@@ -21,8 +26,14 @@ class TrendFollowingStrategy(BaseStrategy):
         long_ma = mean(closes[-8:])
         latest = closes[-1]
         prev = closes[-2]
+        latest_candle = candles[-1]
         trend_gap_pct = ((short_ma - long_ma) / long_ma) if long_ma else 0.0
         momentum_pct = ((latest - prev) / prev) if prev else 0.0
+        prev_avg_volume = mean(volumes[-8:-1])
+        entry_volume_ratio = (volumes[-1] / prev_avg_volume) if prev_avg_volume else 1.0
+        latest_range = latest_candle.high - latest_candle.low
+        entry_close_location = ((latest_candle.close - latest_candle.low) / latest_range) if latest_range > 0 else 1.0
+        recent_high_close = max(closes[-8:-1])
         
         # Near-miss observability: structured metrics
         buy_threshold_pct = self.min_trend_gap_pct
@@ -73,9 +84,12 @@ class TrendFollowingStrategy(BaseStrategy):
                         )
 
         # 진입 신호 로직
-        if trend_gap_pct >= self.min_trend_gap_pct and momentum_pct > 0:
+        volume_confirmed = entry_volume_ratio >= self.min_entry_volume_ratio
+        close_confirmed = entry_close_location >= self.min_entry_close_location
+        breakout_confirmed = (latest > recent_high_close) if self.require_recent_high_breakout else True
+        if trend_gap_pct >= self.min_trend_gap_pct and momentum_pct >= self.min_entry_momentum_pct and volume_confirmed and close_confirmed and breakout_confirmed:
             action = "buy"
-        elif trend_gap_pct <= -self.min_trend_gap_pct and momentum_pct < 0:
+        elif trend_gap_pct <= -self.min_trend_gap_pct and momentum_pct <= -self.min_entry_momentum_pct:
             action = "sell"
         else:
             action = "hold"
@@ -86,6 +100,12 @@ class TrendFollowingStrategy(BaseStrategy):
         meta = {
             "trend_gap_pct": round(trend_gap_pct, 6),
             "momentum_pct": round(momentum_pct, 6),
+            "entry_volume_ratio": round(entry_volume_ratio, 6),
+            "min_entry_volume_ratio": self.min_entry_volume_ratio,
+            "entry_close_location": round(entry_close_location, 6),
+            "min_entry_close_location": self.min_entry_close_location,
+            "recent_high_close": round(recent_high_close, 6),
+            "breakout_confirmed": breakout_confirmed,
             "buy_threshold_pct": buy_threshold_pct,
             "trend_gap_to_threshold_pct": round(trend_gap_to_threshold_pct, 4),
         }

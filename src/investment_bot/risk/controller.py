@@ -43,7 +43,7 @@ class RiskController:
             position_value_budget *= 0.5
 
         if approved and signal.action == "buy":
-            if cash_balance >= self.base_entry_notional:
+            if signal.confidence >= 0.5 and cash_balance >= self.base_entry_notional:
                 position_value_budget = max(position_value_budget, self.base_entry_notional)
             elif cash_balance >= self.min_order_notional:
                 position_value_budget = max(position_value_budget, self.min_order_notional)
@@ -66,6 +66,9 @@ class RiskController:
         elif losing_streak >= settings.losing_streak_threshold_reduced:
             risk_mode = "reduced"
         position_value_budget *= settings.risk_mode_multipliers.get(risk_mode, 1.0)
+
+        if approved and signal.action == "buy" and 0 < position_value_budget < self.min_order_notional and cash_balance >= self.min_order_notional:
+            position_value_budget = self.min_order_notional
 
         size_scale = round((position_value_budget / latest_price), 8) if approved and latest_price > 0 else 0.0
         return {

@@ -8,17 +8,30 @@ from investment_bot.core.trading_policy import build_trading_policy
 class StrategySelectionService:
     def choose(self, symbol: str, regime: str, candidates: list[dict]) -> dict | None:
         allowed = self._allowed_strategies(symbol=symbol, regime=regime)
-        filtered = [c for c in candidates if c["strategy_name"] in allowed]
+        filtered = [
+            c for c in candidates
+            if c["strategy_name"] in allowed
+            and not self._is_unmanaged_sell(c)
+            and c.get("action") != "hold"
+        ]
         if not filtered:
             return None
         filtered.sort(key=lambda c: c.get("score", 0.0), reverse=True)
         return filtered[0]
+
+    def _is_unmanaged_sell(self, candidate: dict) -> bool:
+        if candidate.get("action") != "sell":
+            return False
+        asset = candidate.get("asset") or {}
+        return asset.get("managed") is False
 
     def _allowed_strategies(self, symbol: str, regime: str) -> list[str]:
         symbol = symbol.upper()
         normalized_regime = build_trading_policy(get_settings()).normalize_regime(regime)
         if symbol == "BTC/KRW":
             if normalized_regime in {"trend_up", "trend_down", "sideways"}:
+                if normalized_regime == "sideways":
+                    return ["trend_following", "dca"]
                 return ["trend_following"]
             if normalized_regime in {"sideways", "uncertain"}:
                 return ["dca"]

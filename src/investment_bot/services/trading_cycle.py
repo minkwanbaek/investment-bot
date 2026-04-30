@@ -90,8 +90,9 @@ class TradingCycleService:
                 reason=f"market_regime=sideways; {signal.reason}",
                 meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason="market_regime_sideways_hold"),
             )
-        elif exception_pass:
-            # Exception pass applied - log it for observability
+        elif exception_pass and signal.action != "hold":
+            # Exception pass applied - log it for observability only when it actually preserves
+            # an actionable strategy signal instead of annotating an already-held signal.
             signal.meta = {
                 **getattr(signal, "meta", {}),
                 "route_exception_pass": True,
@@ -120,10 +121,9 @@ class TradingCycleService:
         # Handle force_exit and live/paper execution
         broker_result = None
         if review["approved"]:
-            # Handle force_exit for sell orders
-            if review.get("force_exit") and review["action"] == "sell":
+            if review["action"] == "sell":
                 position_qty = float(self.paper_broker.positions.get(signal.symbol, {}).get("quantity", 0.0) or 0.0)
-                exit_size = getattr(signal, "meta", {}).get("exit_size_scale")
+                exit_size = getattr(signal, "meta", {}).get("exit_size_scale") if review.get("force_exit") else position_qty
                 review["size_scale"] = min(float(exit_size or position_qty), position_qty)
                 review["target_notional"] = round(review["size_scale"] * latest_price, 4)
 

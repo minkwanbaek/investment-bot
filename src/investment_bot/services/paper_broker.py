@@ -321,6 +321,8 @@ class PaperBroker:
         settings = get_settings()
         if settings.partial_take_profit_enabled and not position.get("tp1_done") and position.get("tp1_price") and market_price >= position["tp1_price"]:
             sell_qty = round(position["quantity"] * settings.tp1_size_pct, 8)
+            if sell_qty * market_price < self.min_order_notional <= position["quantity"] * market_price:
+                sell_qty = position["quantity"]
             position["tp1_done"] = True
             if settings.trailing_stop_enabled:
                 position["trailing_active"] = True

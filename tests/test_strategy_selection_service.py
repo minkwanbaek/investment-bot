@@ -12,8 +12,8 @@ def test_btc_downtrend_allows_trend_following():
     assert svc._allowed_strategies("BTC/KRW", "trend_down") == ["trend_following"]
 
 
-def test_btc_sideways_allows_trend_following_due_to_symbol_policy():
-    assert svc._allowed_strategies("BTC/KRW", "sideways") == ["trend_following"]
+def test_btc_sideways_allows_trend_following_and_dca():
+    assert svc._allowed_strategies("BTC/KRW", "sideways") == ["trend_following", "dca"]
 
 
 def test_btc_uncertain_allows_dca():
@@ -62,3 +62,47 @@ def test_choose_returns_none_when_no_match():
     ]
     result = svc.choose("BTC/KRW", "trend_up", candidates)
     assert result is None
+
+
+def test_choose_skips_unmanaged_sell_candidate_for_executable_buy():
+    candidates = [
+        {
+            "strategy_name": "trend_following",
+            "action": "sell",
+            "score": 90.0,
+            "asset": {"managed": False, "managed_notional": 0.0},
+        },
+        {
+            "strategy_name": "mean_reversion",
+            "action": "buy",
+            "score": 40.0,
+            "asset": {"managed": False, "managed_notional": 0.0},
+        },
+    ]
+
+    result = svc.choose("ETH/KRW", "trend_down", candidates)
+
+    assert result["strategy_name"] == "mean_reversion"
+
+
+def test_choose_allows_btc_sideways_dca_buy_when_trend_following_holds():
+    candidates = [
+        {"strategy_name": "trend_following", "action": "hold", "score": 0.0},
+        {"strategy_name": "dca", "action": "buy", "score": 30.0},
+    ]
+
+    result = svc.choose("BTC/KRW", "sideways", candidates)
+
+    assert result["strategy_name"] == "dca"
+
+
+def test_choose_skips_high_score_hold_candidate_for_executable_buy():
+    candidates = [
+        {"strategy_name": "trend_following", "action": "hold", "score": 100.0},
+        {"strategy_name": "dca", "action": "buy", "score": 35.0},
+    ]
+
+    result = svc.choose("BTC/KRW", "sideways", candidates)
+
+    assert result["strategy_name"] == "dca"
+    assert result["action"] == "buy"

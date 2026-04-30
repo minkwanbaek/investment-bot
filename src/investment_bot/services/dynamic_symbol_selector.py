@@ -18,9 +18,19 @@ class DynamicSymbolSelector:
             if len(candles) < 25:
                 continue
             score = self._score(candles)
-            scored.append((score, symbol))
+            if score > 0 and self._has_positive_short_momentum(candles):
+                scored.append((score, symbol))
         scored.sort(reverse=True)
-        return [symbol for _, symbol in scored[:top_n]] or symbols
+        return [symbol for _, symbol in scored[:top_n]]
+
+    def _has_positive_short_momentum(self, candles: list[Candle]) -> bool:
+        if len(candles) < 4:
+            return False
+        recent_base = candles[-4].close
+        prev = candles[-2].close
+        latest = candles[-1].close
+        recent_high_close = max(c.close for c in candles[-8:-1])
+        return prev > 0 and recent_base > 0 and latest > prev and latest > recent_base and latest > recent_high_close
 
     def _score(self, candles: list[Candle]) -> float:
         closes = [c.close for c in candles]
@@ -35,4 +45,7 @@ class DynamicSymbolSelector:
         avg_vol = sum(volume_series[:-1]) / max(len(volume_series[:-1]), 1)
         volume_surge = (volume_series[-1] / avg_vol) if avg_vol else 1.0
         short_momentum = ((latest - prev) / prev) if prev else 0.0
-        return round(traded_value * 0.000001 + volatility * 100 + trend * 100 + volume_surge * 10 + short_momentum * 50, 6)
+        downside_penalty = max(-trend, 0.0) * 300 + max(-short_momentum, 0.0) * 150
+        upside_reward = max(trend, 0.0) * 100 + max(short_momentum, 0.0) * 50
+        directional_volume_surge = volume_surge if short_momentum > 0 else 0.0
+        return round(traded_value * 0.000001 + volatility * 100 + directional_volume_surge * 10 + upside_reward - downside_penalty, 6)

@@ -167,6 +167,14 @@ class FakeDynamicSymbolSelector:
         return symbols[:top_n]
 
 
+class FixedDynamicSymbolSelector:
+    def __init__(self, selected: list[str]):
+        self.selected = selected
+
+    def select(self, symbols: list[str], timeframe: str, top_n: int = 10) -> list[str]:
+        return list(self.selected)
+
+
 def make_service(tmp_path, settings: Settings, shadow: FakeShadowService, account: FakeAccountService):
     return AutoTradeService(
         settings=settings,
@@ -383,6 +391,29 @@ def test_paper_broker_partial_take_profit_trigger(tmp_path):
     assert pos['trailing_stop_price'] == 10246.5
 
 
+def test_paper_broker_tp1_sells_full_position_when_partial_is_below_min_order(tmp_path, monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    monkeypatch.setenv("INVESTMENT_BOT_CONFIG_PATH", "config/dev.yml")
+    get_settings.cache_clear()
+    ledger_path = tmp_path / 'ledger.json'
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=LedgerStore(str(ledger_path)), min_order_notional=5000.0)
+    broker.submit(
+        reviewed_signal={
+            'strategy_name': 'trend_following', 'symbol': 'BTC/KRW', 'action': 'buy',
+            'confidence': 0.8, 'size_scale': 10.0, 'reason': 'entry', 'strategy_version': 'v1.0-dev'
+        },
+        execution_price=1000.0,
+    )
+
+    result = broker.evaluate_exit_rules('BTC/KRW', market_price=1016.0)
+
+    assert result['status'] == 'triggered'
+    assert result['reason'] == 'partial_take_profit'
+    assert result['size_scale'] == broker.positions['BTC/KRW']['quantity']
+    get_settings.cache_clear()
+
+
 def test_paper_broker_trailing_stop_trigger(tmp_path):
     from datetime import datetime, timezone
     ledger_path = tmp_path / 'ledger.json'
@@ -553,6 +584,28 @@ def test_auto_trade_service_caps_buy_by_review_target_notional(tmp_path):
     assert result['submit']['volume'] == 5.2
 
 
+def test_auto_trade_service_skips_unexecutable_top_scored_buy_for_next_buy(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "buy", "latest_price": 1000.0, "confidence": 0.9, "target_notional": 4000.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("ETH/KRW", "trend_following"): {"action": "buy", "latest_price": 1000.0, "confidence": 0.5, "target_notional": 6000.0, "market_regime": {"regime": "uptrend"}},
+        ("ETH/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("ETH/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+    })
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["BTC/KRW", "ETH/KRW"], auto_trade_min_krw_balance=10000, auto_trade_target_allocation_pct=20, auto_trade_meaningful_order_notional=5000, min_order_notional=5000),
+        shadow,
+        FakeAccountService(krw_cash=100000),
+    )
+    result = service.run_once()
+    assert result["status"] == "submitted"
+    assert result["symbol"] == "ETH/KRW"
+    assert result["side"] == "buy"
+    assert result["submit"]["volume"] == 6.0
+
+
 def test_auto_trade_service_evaluates_configured_dynamic_top_n(tmp_path):
     symbols = [f"SYM{i}/KRW" for i in range(12)]
     by_symbol_strategy = {}
@@ -619,6 +672,70 @@ def test_auto_trade_service_enforces_total_exposure_limit_before_buy(tmp_path):
     assert result['remaining_exposure_room'] == 0.0
 
 
+def test_auto_trade_service_enforces_symbol_exposure_limit_before_buy(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "buy", "latest_price": 1000.0, "confidence": 0.7, "target_notional": 10000.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+    })
+    service = make_service(
+        tmp_path,
+        Settings(
+            symbols=["BTC/KRW"],
+            auto_trade_min_krw_balance=10000,
+            auto_trade_target_allocation_pct=20,
+            auto_trade_meaningful_order_notional=5000,
+            min_order_notional=5000,
+            max_symbol_exposure_pct=20.0,
+            auto_trade_max_total_exposure_pct=50.0,
+        ),
+        shadow,
+        FakeAccountService(krw_cash=81000, asset_balances={"BTC/KRW": 19.0}, avg_buy_prices={"BTC/KRW": 1000.0}),
+    )
+    result = service.run_once()
+    assert result['status'] == 'skipped'
+    assert result['reason'] == 'below_meaningful_order_notional_or_total_exposure_limit'
+    assert result['blocker'] == 'symbol_exposure_limit'
+    assert result['symbol_exposure'] == 19000.0
+    assert result['remaining_symbol_room'] == 1000.0
+
+
+def test_dynamic_symbol_selection_keeps_held_symbol_for_stop_loss(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "buy", "latest_price": 1000.0, "confidence": 0.7, "target_notional": 10000.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("ETH/KRW", "trend_following"): {"action": "hold", "latest_price": 970.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("ETH/KRW", "mean_reversion"): {"action": "hold", "latest_price": 970.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("ETH/KRW", "dca"): {"action": "hold", "latest_price": 970.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+    })
+    service = make_service(
+        tmp_path,
+        Settings(
+            symbols=["BTC/KRW", "ETH/KRW"],
+            dynamic_symbol_selection=True,
+            dynamic_symbol_top_n=1,
+            auto_trade_min_krw_balance=10000,
+            auto_trade_target_allocation_pct=20,
+            auto_trade_meaningful_order_notional=5000,
+            auto_trade_min_managed_position_notional=5000.0,
+            auto_trade_stop_loss_pct=1.5,
+            min_order_notional=5000,
+        ),
+        shadow,
+        FakeAccountService(krw_cash=50000, asset_balances={"ETH/KRW": 10.0}, avg_buy_prices={"ETH/KRW": 1000.0}),
+    )
+    service.dynamic_symbol_selector = FixedDynamicSymbolSelector(["BTC/KRW"])
+
+    result = service.run_once()
+
+    assert service._last_selected_symbols == ["BTC/KRW", "ETH/KRW"]
+    assert result["status"] == "submitted"
+    assert result["symbol"] == "ETH/KRW"
+    assert result["side"] == "sell"
+    assert result["override"]["override_reason"] == "stop_loss"
+
+
 def test_auto_trade_service_prefers_sell_over_buy_across_symbols(tmp_path):
     shadow = FakeShadowService({
         ("BTC/KRW", "trend_following"): {"action": "buy", "latest_price": 1000.0, "confidence": 0.9, "target_notional": 6000.0, "market_regime": {"regime": "uptrend"}},
@@ -633,6 +750,35 @@ def test_auto_trade_service_prefers_sell_over_buy_across_symbols(tmp_path):
     assert result['status'] == 'submitted'
     assert result['symbol'] == 'ETH/KRW'
     assert result['side'] == 'sell'
+
+
+def test_auto_trade_service_prefers_stronger_executable_buy_over_weak_sell(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "buy", "latest_price": 1000.0, "confidence": 0.7, "target_notional": 10000.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("ETH/KRW", "trend_following"): {"action": "hold", "latest_price": 2000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("ETH/KRW", "mean_reversion"): {"action": "sell", "latest_price": 2000.0, "confidence": 0.2, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("ETH/KRW", "dca"): {"action": "hold", "latest_price": 2000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+    })
+    service = make_service(
+        tmp_path,
+        Settings(
+            symbols=["BTC/KRW", "ETH/KRW"],
+            auto_trade_min_krw_balance=10000,
+            auto_trade_target_allocation_pct=20,
+            auto_trade_meaningful_order_notional=5000,
+            min_order_notional=5000,
+            auto_trade_min_managed_position_notional=5000.0,
+        ),
+        shadow,
+        FakeAccountService(krw_cash=50000, asset_balances={"ETH/KRW": 5.0}, avg_buy_prices={"ETH/KRW": 2000.0}),
+    )
+    result = service.run_once()
+    assert result['status'] == 'submitted'
+    assert result['symbol'] == 'BTC/KRW'
+    assert result['side'] == 'buy'
+    assert result['submit']['volume'] == 10.0
 
 
 def test_auto_trade_service_ignores_unactionable_sell_when_buy_candidate_exists(tmp_path):
@@ -667,6 +813,35 @@ def test_auto_trade_service_submits_sell_using_exchange_balance(tmp_path):
     assert result['status'] == 'submitted'
     assert result['side'] == 'sell'
     assert result['submit']['volume'] == 0.2
+
+
+def test_auto_trade_service_sell_does_not_cool_down_next_buy(tmp_path):
+    sell_shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "sell", "latest_price": 1000.0, "confidence": 0.8, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "downtrend"}},
+    })
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["BTC/KRW"], auto_trade_cooldown_cycles=1, min_order_notional=5000, auto_trade_min_managed_position_notional=100.0),
+        sell_shadow,
+        FakeAccountService(krw_cash=50000, asset_balances={"BTC/KRW": 6.0}, avg_buy_prices={"BTC/KRW": 1000.0}),
+    )
+
+    first = service.run_once()
+    service.shadow_service = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "buy", "latest_price": 1000.0, "confidence": 0.9, "target_notional": 10000.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1000.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+    })
+    service.account_service = FakeAccountService(krw_cash=50000, asset_balances={}, avg_buy_prices={})
+
+    second = service.run_once()
+
+    assert first["status"] == "submitted"
+    assert first["side"] == "sell"
+    assert second["status"] == "submitted"
+    assert second["side"] == "buy"
 
 
 def test_auto_trade_service_sells_full_position_when_partial_sell_is_below_min_order(tmp_path):
@@ -708,9 +883,8 @@ def test_auto_trade_service_reports_managed_notional_when_sell_is_blocked_by_thr
     )
     result = service.run_once()
     assert result['status'] == 'skipped'
-    assert result['reason'] == 'below_min_managed_position_notional'
-    assert result['managed_notional'] == 9987.8346
-    assert result['min_managed_position_notional'] == 10000.0
+    assert result['reason'] == 'non_actionable_signal'
+    assert result['top_hold_candidates'] == []
 
 
 def test_auto_trade_service_logs_hold_summary_when_all_candidates_are_non_actionable(tmp_path, caplog):
@@ -724,9 +898,8 @@ def test_auto_trade_service_logs_hold_summary_when_all_candidates_are_non_action
         result = service.run_once()
     assert result["status"] == "skipped"
     assert result["reason"] == "non_actionable_signal"
-    assert "top_hold_candidates" in caplog.text
-    assert "BTC/KRW" in caplog.text
-    assert "strategy_name" in caplog.text
+    assert result["top_hold_candidates"] == []
+    assert "top_hold_candidates" not in caplog.text
 
 
 def test_auto_trade_service_stop_loss_uses_price_pct_not_quantity(tmp_path):
@@ -754,3 +927,56 @@ def test_auto_trade_service_take_profit_trailing_stop_with_small_btc_quantity(tm
     assert result['status'] == 'submitted'
     assert result['override']['override_reason'] == 'take_profit_trailing_stop'
     assert result['submit']['volume'] == 0.00030197
+
+
+def test_auto_trade_service_trailing_profit_uses_peak_activation_after_pullback(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "hold", "latest_price": 101400.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 101400.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 101400.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "uptrend"}},
+    })
+    service = make_service(tmp_path, Settings(symbols=["BTC/KRW"], auto_trade_stop_loss_pct=1.5, auto_trade_partial_take_profit_pct=2.0, auto_trade_trailing_stop_pct=1.0, auto_trade_partial_sell_ratio=0.5, auto_trade_min_managed_position_notional=10.0), shadow, FakeAccountService(krw_cash=0.0, asset_balances={"BTC/KRW": 0.00060394}, avg_buy_prices={"BTC/KRW": 100000.0}))
+    service._peak_price_by_symbol['BTC/KRW'] = 103500.0
+
+    result = service.run_once()
+
+    assert result['status'] == 'submitted'
+    assert result['override']['override_reason'] == 'take_profit_trailing_stop'
+    assert result['submit']['volume'] == 0.00030197
+
+
+def test_auto_trade_service_prioritizes_stop_loss_override_over_trailing_profit(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {"action": "hold", "latest_price": 1020.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "trend_up"}},
+        ("BTC/KRW", "mean_reversion"): {"action": "hold", "latest_price": 1020.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "trend_up"}},
+        ("BTC/KRW", "dca"): {"action": "hold", "latest_price": 1020.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "trend_up"}},
+        ("ETH/KRW", "trend_following"): {"action": "hold", "latest_price": 970.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "trend_down"}},
+        ("ETH/KRW", "mean_reversion"): {"action": "hold", "latest_price": 970.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "trend_down"}},
+        ("ETH/KRW", "dca"): {"action": "hold", "latest_price": 970.0, "confidence": 0.0, "target_notional": 0.0, "market_regime": {"regime": "trend_down"}},
+    })
+    service = make_service(
+        tmp_path,
+        Settings(
+            symbols=["BTC/KRW", "ETH/KRW"],
+            auto_trade_stop_loss_pct=1.5,
+            auto_trade_partial_take_profit_pct=2.0,
+            auto_trade_trailing_stop_pct=0.5,
+            auto_trade_partial_sell_ratio=0.5,
+            auto_trade_min_managed_position_notional=100.0,
+        ),
+        shadow,
+        FakeAccountService(
+            krw_cash=0.0,
+            asset_balances={"BTC/KRW": 10.0, "ETH/KRW": 10.0},
+            avg_buy_prices={"BTC/KRW": 1000.0, "ETH/KRW": 1000.0},
+        ),
+    )
+    service._peak_price_by_symbol["BTC/KRW"] = 1030.0
+
+    result = service.run_once()
+
+    assert result["status"] == "submitted"
+    assert result["symbol"] == "ETH/KRW"
+    assert result["side"] == "sell"
+    assert result["override"]["override_reason"] == "stop_loss"
+    assert result["submit"]["volume"] == 10.0

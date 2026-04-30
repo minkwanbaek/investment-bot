@@ -25,11 +25,104 @@ def test_trend_following_holds_on_small_noisy_gap():
 
 def test_trend_following_buys_on_clear_uptrend_with_positive_momentum():
     candles = [
-        Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=c, volume=1, timestamp=str(i))
-        for i, c in enumerate([100, 101, 102, 103, 104, 105, 107, 109])
+        Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=close, volume=volume, timestamp=str(i))
+        for i, (close, volume) in enumerate(
+            zip([100, 101, 102, 103, 104, 105, 107, 109], [10, 10, 10, 10, 10, 10, 10, 13])
+        )
     ]
     signal = TrendFollowingStrategy().generate_signal(candles)
     assert signal.action == "buy"
+
+
+def test_trend_following_holds_low_volume_breakout():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=close, volume=volume, timestamp=str(i))
+        for i, (close, volume) in enumerate(
+            zip([100, 101, 102, 103, 104, 105, 107, 109], [10, 10, 10, 10, 10, 10, 10, 4])
+        )
+    ]
+    signal = TrendFollowingStrategy().generate_signal(candles)
+    assert signal.action == "hold"
+    assert signal.meta["entry_volume_ratio"] == 0.4
+
+
+def test_trend_following_holds_average_volume_breakout():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=close, volume=volume, timestamp=str(i))
+        for i, (close, volume) in enumerate(
+            zip([100, 101, 102, 103, 104, 105, 107, 109], [10, 10, 10, 10, 10, 10, 10, 11])
+        )
+    ]
+    signal = TrendFollowingStrategy().generate_signal(candles)
+    assert signal.action == "hold"
+    assert signal.meta["entry_volume_ratio"] == 1.1
+
+
+def test_trend_following_holds_upper_wick_breakout():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
+        for i, close in enumerate([100, 101, 102, 103, 104, 105, 107])
+    ]
+    candles.append(
+        Candle(
+            symbol="BTC/KRW",
+            timeframe="1h",
+            open=107,
+            high=116,
+            low=106,
+            close=109,
+            volume=12,
+            timestamp="7",
+        )
+    )
+    signal = TrendFollowingStrategy().generate_signal(candles)
+    assert signal.action == "hold"
+    assert signal.meta["entry_close_location"] == 0.3
+
+
+def test_trend_following_holds_marginal_close_location_breakout():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
+        for i, close in enumerate([100, 101, 102, 103, 104, 105, 107])
+    ]
+    candles.append(
+        Candle(
+            symbol="BTC/KRW",
+            timeframe="1h",
+            open=107,
+            high=111,
+            low=101,
+            close=107.5,
+            volume=13,
+            timestamp="7",
+        )
+    )
+    signal = TrendFollowingStrategy().generate_signal(candles)
+    assert signal.action == "hold"
+    assert signal.meta["entry_close_location"] == 0.65
+
+
+def test_trend_following_holds_rebound_below_recent_high():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
+        for i, close in enumerate([100, 100, 100, 115, 105, 106, 107])
+    ]
+    candles.append(
+        Candle(
+            symbol="BTC/KRW",
+            timeframe="1h",
+            open=107,
+            high=110,
+            low=105,
+            close=109,
+            volume=16,
+            timestamp="7",
+        )
+    )
+    signal = TrendFollowingStrategy().generate_signal(candles)
+    assert signal.action == "hold"
+    assert signal.meta["breakout_confirmed"] is False
+    assert signal.meta["recent_high_close"] == 115
 
 
 def test_trend_following_sells_on_clear_downtrend_with_negative_momentum():
