@@ -5,6 +5,7 @@ import pytest
 
 from investment_bot.core.settings import Settings
 from investment_bot.services.auto_trade_service import AutoTradeService
+from investment_bot.services.auto_trade_scheduler import AutoTradeScheduler
 from investment_bot.models.trade_log import TradeLogSchema
 from investment_bot.services.ledger_store import LedgerStore
 from investment_bot.services.paper_broker import PaperBroker
@@ -779,6 +780,77 @@ def test_auto_trade_service_prefers_stronger_executable_buy_over_weak_sell(tmp_p
     assert result['symbol'] == 'BTC/KRW'
     assert result['side'] == 'buy'
     assert result['submit']['volume'] == 10.0
+
+
+def test_auto_trade_service_falls_back_to_static_slice_when_dynamic_selector_returns_empty(tmp_path):
+    class EmptySelector:
+        def select(self, symbols, timeframe, top_n=10):
+            return []
+
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["BTC/KRW", "ETH/KRW", "SOL/KRW"], dynamic_symbol_selection=True, dynamic_symbol_top_n=2),
+        FakeShadowService(),
+        FakeAccountService(krw_cash=100000.0),
+    )
+    service.dynamic_symbol_selector = EmptySelector()
+    service._collect_symbol_candidates = lambda symbol: []
+
+    result = service.run_once()
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "non_actionable_signal"
+    assert result["evaluated_symbols"] == ["BTC/KRW", "ETH/KRW"]
+    assert result["batch_size"] == 2
+    assert result["total_symbols"] == 2
+    assert service.profile()["last_selected_symbols"] == ["BTC/KRW", "ETH/KRW"]
+
+
+def test_auto_trade_service_watchdog_degrades_after_repeated_zero_evaluated_skips(tmp_path):
+    class EmptySelector:
+        def select(self, symbols, timeframe, top_n=10):
+            return []
+
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["BTC/KRW", "ETH/KRW", "SOL/KRW"], dynamic_symbol_selection=True, dynamic_symbol_top_n=2),
+        FakeShadowService(),
+        FakeAccountService(krw_cash=100000.0),
+    )
+    service.dynamic_symbol_selector = EmptySelector()
+    service._collect_symbol_candidates = lambda symbol: []
+    service.active = True
+
+    service.run_once()
+    service.run_once()
+    service.run_once()
+
+    status = service.status()
+    assert status["consecutive_skip_count"] == 3
+    assert status["consecutive_zero_evaluated_count"] == 0
+    assert status["watchdog"]["health"] == "warning"
+    assert "no_submission_since_start" in status["watchdog"]["warnings"]
+
+
+def test_auto_trade_service_watchdog_degrades_after_empty_batches(tmp_path):
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["BTC/KRW", "ETH/KRW"], dynamic_symbol_selection=False),
+        FakeShadowService(),
+        FakeAccountService(krw_cash=100000.0),
+    )
+    service._collect_symbol_candidates = lambda symbol: []
+    service._scheduler = AutoTradeScheduler(all_symbols=["BTC/KRW", "ETH/KRW"], priority_count=0, batch_size=0)
+    service.active = True
+
+    service.run_once()
+    service.run_once()
+    service.run_once()
+
+    status = service.status()
+    assert status["consecutive_zero_evaluated_count"] == 3
+    assert status["watchdog"]["health"] == "degraded"
+    assert "zero_evaluated_symbols_streak" in status["watchdog"]["warnings"]
 
 
 def test_auto_trade_service_tries_next_buy_when_top_preview_is_blocked(tmp_path):

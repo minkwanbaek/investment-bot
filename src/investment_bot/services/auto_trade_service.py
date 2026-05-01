@@ -34,6 +34,10 @@ class AutoTradeService:
     _last_selected_symbols: list[str] = field(default_factory=list, init=False)
     _peak_price_by_symbol: dict[str, float] = field(default_factory=dict, init=False)
     _scheduler: AutoTradeScheduler | None = field(default=None, init=False)
+    _last_evaluated_at: datetime | None = field(default=None, init=False)
+    _last_nonempty_batch_at: datetime | None = field(default=None, init=False)
+    _consecutive_skip_count: int = field(default=0, init=False)
+    _consecutive_zero_evaluated_count: int = field(default=0, init=False)
 
     def profile(self) -> dict:
         return {
@@ -64,10 +68,16 @@ class AutoTradeService:
     def status(self) -> dict:
         profile = self.profile()
         profile["last_selected_symbols"] = self._last_selected_symbols
+        watchdog = self._watchdog_status()
         return {
             "active": self.active,
             "profile": profile,
             "last_submitted_at": self._last_submitted_at.isoformat() if self._last_submitted_at else None,
+            "last_evaluated_at": self._last_evaluated_at.isoformat() if self._last_evaluated_at else None,
+            "last_nonempty_batch_at": self._last_nonempty_batch_at.isoformat() if self._last_nonempty_batch_at else None,
+            "consecutive_skip_count": self._consecutive_skip_count,
+            "consecutive_zero_evaluated_count": self._consecutive_zero_evaluated_count,
+            "watchdog": watchdog,
             "last_result": self._last_result,
         }
 
@@ -104,12 +114,23 @@ class AutoTradeService:
         symbols = self.settings.symbols
         dynamic_symbols_selected = False
         if self.settings.dynamic_symbol_selection and self.dynamic_symbol_selector:
-            symbols = self.dynamic_symbol_selector.select(
+            selected_symbols = self.dynamic_symbol_selector.select(
                 symbols=self.settings.symbols,
                 timeframe=self.settings.auto_trade_timeframe,
                 top_n=self.settings.dynamic_symbol_top_n,
             )
-            dynamic_symbols_selected = True
+            if selected_symbols:
+                symbols = selected_symbols
+                dynamic_symbols_selected = True
+            else:
+                fallback_count = min(len(self.settings.symbols), max(1, int(self.settings.dynamic_symbol_top_n)))
+                symbols = list(self.settings.symbols[:fallback_count])
+                logger.warning(
+                    "dynamic selector returned 0 symbols; falling back to static top slice | fallback_count=%d total_symbols=%d",
+                    fallback_count,
+                    len(self.settings.symbols),
+                )
+                dynamic_symbols_selected = False
             held_symbols = self._held_symbols_for_exit_scan(account=account, symbols=self.settings.symbols)
             for symbol in held_symbols:
                 if symbol not in symbols:
@@ -655,7 +676,54 @@ class AutoTradeService:
                 time.sleep(1)
                 slept += 1
 
+    def _watchdog_status(self) -> dict:
+        now = datetime.now(timezone.utc)
+        minutes_since_last_submission = None
+        if self._last_submitted_at:
+            minutes_since_last_submission = round((now - self._last_submitted_at).total_seconds() / 60, 2)
+        minutes_since_last_nonempty_batch = None
+        if self._last_nonempty_batch_at:
+            minutes_since_last_nonempty_batch = round((now - self._last_nonempty_batch_at).total_seconds() / 60, 2)
+
+        health = "ok"
+        warnings: list[str] = []
+        if self._consecutive_zero_evaluated_count >= 3:
+            health = "degraded"
+            warnings.append("zero_evaluated_symbols_streak")
+        if self._consecutive_skip_count >= 6:
+            health = "degraded" if health != "degraded" else health
+            warnings.append("consecutive_skip_streak")
+        if self.active and minutes_since_last_submission is None and self._consecutive_skip_count >= 3:
+            if health == "ok":
+                health = "warning"
+            warnings.append("no_submission_since_start")
+        if self.active and minutes_since_last_nonempty_batch is not None:
+            max_idle_minutes = max(15, int(self.settings.auto_trade_interval_seconds / 60) * 3)
+            if minutes_since_last_nonempty_batch >= max_idle_minutes:
+                health = "degraded"
+                warnings.append("no_nonempty_batch_recently")
+
+        return {
+            "health": health,
+            "warnings": warnings,
+            "minutes_since_last_submission": minutes_since_last_submission,
+            "minutes_since_last_nonempty_batch": minutes_since_last_nonempty_batch,
+        }
+
     def _remember(self, result: dict, record_kind: str) -> dict:
+        now = datetime.now(timezone.utc)
         self._last_result = result
+        self._last_evaluated_at = now
+        if result.get("batch_size", 0) > 0:
+            self._last_nonempty_batch_at = now
+        if record_kind == "auto_trade_submit":
+            self._consecutive_skip_count = 0
+            self._consecutive_zero_evaluated_count = 0
+        else:
+            self._consecutive_skip_count = self._consecutive_skip_count + 1 if record_kind == "auto_trade_skip" else 0
+            if result.get("batch_size", 0) == 0:
+                self._consecutive_zero_evaluated_count += 1
+            else:
+                self._consecutive_zero_evaluated_count = 0
         self.run_history_service.record(kind=record_kind, payload=result)
         return result
