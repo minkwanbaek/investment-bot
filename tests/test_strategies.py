@@ -46,7 +46,7 @@ def test_trend_following_holds_low_volume_breakout():
     assert signal.meta["entry_volume_ratio"] == 0.4
 
 
-def test_trend_following_holds_average_volume_breakout():
+def test_trend_following_holds_average_plus_volume_breakout():
     candles = [
         Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=close, volume=volume, timestamp=str(i))
         for i, (close, volume) in enumerate(
@@ -102,6 +102,28 @@ def test_trend_following_holds_marginal_close_location_breakout():
     assert signal.meta["entry_close_location"] == 0.65
 
 
+def test_trend_following_holds_weak_close_location_breakout():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
+        for i, close in enumerate([100, 100.2, 100.5, 100.8, 101.0, 101.2, 101.4])
+    ]
+    candles.append(
+        Candle(
+            symbol="BTC/KRW",
+            timeframe="1h",
+            open=101.4,
+            high=102.5,
+            low=101.0714285714,
+            close=102.1,
+            volume=14,
+            timestamp="7",
+        )
+    )
+    signal = TrendFollowingStrategy().generate_signal(candles)
+    assert signal.action == "hold"
+    assert signal.meta["entry_close_location"] == 0.72
+
+
 def test_trend_following_holds_rebound_below_recent_high():
     candles = [
         Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
@@ -132,6 +154,27 @@ def test_trend_following_sells_on_clear_downtrend_with_negative_momentum():
     ]
     signal = TrendFollowingStrategy().generate_signal(candles)
     assert signal.action == "sell"
+
+
+def test_trend_following_exits_open_position_at_dev_stop_loss_threshold():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
+        for i, close in enumerate([100, 100.2, 100.4, 100.6, 100.8, 100.6, 100.2, 98.4])
+    ]
+
+    class Broker:
+        positions = {
+            "BTC/KRW": {
+                "quantity": 1.0,
+                "average_price": 100.0,
+            }
+        }
+
+    signal = TrendFollowingStrategy().generate_signal(candles, broker=Broker())
+
+    assert signal.action == "sell"
+    assert signal.meta["force_exit"] is True
+    assert signal.meta["exit_reason"] == "stop_loss"
 
 
 def test_mean_reversion_buys_on_deep_discount_with_stabilizing_momentum():

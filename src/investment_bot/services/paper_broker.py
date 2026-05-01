@@ -58,6 +58,17 @@ class PaperBroker:
             position['quantity'] = 0.0
             position['average_price'] = 0.0
 
+    def _current_total_equity(self, symbol: str | None = None, market_price: float | None = None) -> float:
+        total_position_value = 0.0
+        for position_symbol, position in self.positions.items():
+            qty = max((position or {}).get("quantity", 0.0), 0.0)
+            if position_symbol == symbol and market_price is not None:
+                ref_price = market_price
+            else:
+                ref_price = self.last_prices.get(position_symbol, (position or {}).get("average_price", 0.0))
+            total_position_value += qty * max(ref_price or 0.0, 0.0)
+        return round(self.cash_balance + total_position_value, 4)
+
     def _load_state(self) -> None:
         if not self.ledger_store:
             return
@@ -173,7 +184,7 @@ class PaperBroker:
             }
         if action == "buy":
             current_position_value = self.positions.get(symbol, {}).get("quantity", 0.0) * requested_price
-            max_symbol_exposure_value = self.starting_cash * (self.max_symbol_exposure_pct / 100)
+            max_symbol_exposure_value = self._current_total_equity(symbol, requested_price) * (self.max_symbol_exposure_pct / 100)
             if current_position_value + notional_value > max_symbol_exposure_value:
                 return {
                     "status": "rejected",

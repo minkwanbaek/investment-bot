@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 
+from investment_bot.core.settings import get_settings
 from investment_bot.services.account_service import AccountService
 from investment_bot.services.exchange_rules_service import ExchangeRulesService
 from investment_bot.services.run_history_service import RunHistoryService
@@ -48,12 +49,16 @@ class LiveExecutionService:
             requested_notional = normalized_price * volume
             min_notional = max(rules["min_order_notional"], requested_notional)
             if krw_cash is not None:
-                min_notional = min(min_notional, krw_cash)
+                fee_multiplier = 1 + (get_settings().trading_fee_pct / 100)
+                max_affordable_notional = krw_cash / fee_multiplier
+                min_notional = min(min_notional, max_affordable_notional)
             adjusted_volume = min_notional / normalized_price
 
         notional = round(normalized_price * adjusted_volume, 8)
+        fee_paid = round(notional * (get_settings().trading_fee_pct / 100), 8) if side == "buy" else 0.0
+        total_cost = round(notional + fee_paid, 8) if side == "buy" else notional
         allowed = notional >= rules["min_order_notional"]
-        if side == "buy" and krw_cash is not None and notional > krw_cash:
+        if side == "buy" and krw_cash is not None and total_cost > krw_cash:
             allowed = False
         if side == "sell" and asset_balance is not None and adjusted_volume > asset_balance:
             allowed = False
@@ -72,6 +77,8 @@ class LiveExecutionService:
             "tick_size": normalized["tick_size"],
             "volume": adjusted_volume,
             "notional": notional,
+            "fee_paid": fee_paid,
+            "total_cost": total_cost,
             "min_order_notional": rules["min_order_notional"],
             "account_summary": account_summary,
             "asset_summary": asset_summary,

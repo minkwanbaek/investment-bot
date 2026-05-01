@@ -29,10 +29,10 @@ trading:
   dynamic_symbol_top_n: 10
   starting_cash: 10000000
   min_order_notional: 5000
-  max_consecutive_buys: 5
-  max_symbol_exposure_pct: 25.0
+  max_consecutive_buys: 3
+  max_symbol_exposure_pct: 20.0
 risk:
-  max_risk_per_trade_pct: 20.0
+  max_risk_per_trade_pct: 5.0
   max_daily_loss_pct: 3.0
   max_drawdown_pct: 10.0
 auto_trade:
@@ -43,18 +43,18 @@ auto_trade:
   timeframe: 5m
   limit: 100
   interval_seconds: 300
-  min_krw_balance: 15000
+  min_krw_balance: 10000
   base_entry_notional: 10000
   target_allocation_pct: 20.0
-  meaningful_order_notional: 8000
+  meaningful_order_notional: 5000
   max_pending_seconds: 600
   cooldown_cycles: 1
   stop_loss_pct: 1.5
-  partial_take_profit_pct: 2.0
-  trailing_stop_pct: 1.0
+  partial_take_profit_pct: 1.5
+  trailing_stop_pct: 0.5
   partial_sell_ratio: 0.5
-  max_total_exposure_pct: 80.0
-  min_managed_position_notional: 1500.0
+  max_total_exposure_pct: 50.0
+  min_managed_position_notional: 5000.0
 live:
   confirm_live_trading: true
 sideway_filter:
@@ -63,10 +63,10 @@ sideway_filter:
   range_threshold: 0.01
   volatility_block_on_low: true
   breakout_exception_enabled: true
-  breakout_exception_momentum_min: 0.001
+  breakout_exception_momentum_min: 0.0008
   breakout_exception_trend_gap_ratio: 0.8
   breakout_exception_allow_bearish_higher_tf: false
-  breakout_exception_allow_low_volatility: true
+  breakout_exception_allow_low_volatility: false
 strategy_route:
   trend_strategy_allowed_regimes:
     - trend_up
@@ -83,7 +83,7 @@ risk_control:
   volatility_size_multipliers:
     low: 1.0
     normal: 1.0
-    high: 0.5
+    high: 0.25
   losing_streak_threshold_reduced: 2
   losing_streak_threshold_minimal: 4
   risk_mode_multipliers:
@@ -94,14 +94,14 @@ broker_exit:
   atr_stop_enabled: true
   stop_atr_multiplier: 2.0
   partial_take_profit_enabled: true
-  tp1_ratio: 0.03
+  tp1_ratio: 0.015
   tp1_size_pct: 0.5
   trailing_stop_enabled: true
   trailing_activation_ratio: 0.02
-  trailing_distance_ratio: 0.01
+  trailing_distance_ratio: 0.005
   timeout_exit_enabled: true
   max_holding_minutes: 60
-  min_progress_pct: 0.005
+  min_progress_pct: 0.003
 standard_backtest:
   fee_model: paper_broker_fee_pct
   slippage_model: paper_broker_slippage_pct

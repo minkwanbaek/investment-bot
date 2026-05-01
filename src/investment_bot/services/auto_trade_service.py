@@ -174,7 +174,8 @@ class AutoTradeService:
                     non_dust_sells.append(c)
             if non_dust_sells:
                 chosen = max(non_dust_sells, key=lambda c: (self._sell_candidate_priority(c), c["score"]))
-                if chosen.get("override") is None and executable_buys and executable_buys[0]["score"] > chosen["score"]:
+                override_reason = (chosen.get("override") or {}).get("override_reason")
+                if override_reason != "stop_loss" and executable_buys and executable_buys[0]["score"] > chosen["score"]:
                     chosen_buy = executable_buys[0]
                     logger.info(
                         "buy candidate chosen over weak sell | buy_symbol=%s buy_score=%.4f sell_symbol=%s sell_score=%.4f",
@@ -190,7 +191,18 @@ class AutoTradeService:
                 logger.info("sell candidates filtered out: all dust positions below meaningful_order_notional")
 
         if buy_candidates:
-            chosen = executable_buys[0] if executable_buys else ranked_buys[0]
+            if executable_buys:
+                first_blocked_result = None
+                for chosen in executable_buys:
+                    logger.info("buy candidate chosen | symbol=%s score=%.4f confidence=%.4f", chosen["symbol"], chosen["score"], chosen["confidence"])
+                    result = self._handle_buy(chosen, krw_cash=krw_cash, account=account)
+                    if result.get("status") == "skipped" and result.get("reason") == "preview_blocked":
+                        first_blocked_result = first_blocked_result or result
+                        logger.info("buy candidate preview blocked; trying next executable buy | symbol=%s", chosen["symbol"])
+                        continue
+                    return result
+                return first_blocked_result
+            chosen = ranked_buys[0]
             logger.info("buy candidate chosen | symbol=%s score=%.4f confidence=%.4f", chosen["symbol"], chosen["score"], chosen["confidence"])
             return self._handle_buy(chosen, krw_cash=krw_cash, account=account)
 
@@ -578,6 +590,17 @@ class AutoTradeService:
                 "reason": "sell_volume_zero_after_sizing",
                 "available_volume": available_volume,
                 "sell_ratio": sell_ratio,
+                "chosen": chosen,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
+        sell_notional = chosen["latest_price"] * volume
+        if sell_notional < self.settings.min_order_notional:
+            result = {
+                "status": "skipped",
+                "reason": "sell_below_min_order_notional",
+                "target_notional": round(sell_notional, 4),
+                "min_order_notional": self.settings.min_order_notional,
+                "available_volume": available_volume,
                 "chosen": chosen,
             }
             return self._remember(result, record_kind="auto_trade_skip")

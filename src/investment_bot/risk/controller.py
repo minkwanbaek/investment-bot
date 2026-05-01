@@ -39,9 +39,6 @@ class RiskController:
                 approved = False
                 block_reason = "higher_tf_bias_mismatch"
 
-        if approved and not force_exit and policy.snapshot.high_volatility_defense_enabled and volatility_state == "high":
-            position_value_budget *= 0.5
-
         if approved and signal.action == "buy":
             if signal.confidence >= 0.5 and cash_balance >= self.base_entry_notional:
                 position_value_budget = max(position_value_budget, self.base_entry_notional)
@@ -67,7 +64,13 @@ class RiskController:
             risk_mode = "reduced"
         position_value_budget *= settings.risk_mode_multipliers.get(risk_mode, 1.0)
 
-        if approved and signal.action == "buy" and 0 < position_value_budget < self.min_order_notional and cash_balance >= self.min_order_notional:
+        if (
+            approved
+            and signal.action == "buy"
+            and risk_mode == "normal"
+            and 0 < position_value_budget < self.min_order_notional
+            and cash_balance >= self.min_order_notional
+        ):
             position_value_budget = self.min_order_notional
 
         size_scale = round((position_value_budget / latest_price), 8) if approved and latest_price > 0 else 0.0

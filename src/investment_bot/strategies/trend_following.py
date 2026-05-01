@@ -7,12 +7,12 @@ class TrendFollowingStrategy(BaseStrategy):
     name = "trend_following"
     min_trend_gap_pct = 0.0015  # 0.15%
     min_entry_momentum_pct = 0.0012  # 0.12%
-    min_entry_volume_ratio = 1.2
-    min_entry_close_location = 0.7
+    min_entry_volume_ratio = 1.3
+    min_entry_close_location = 0.8
     require_recent_high_breakout = True
     
     # 청산 조건
-    stop_loss_pct = -0.02  # -2%
+    stop_loss_pct = -0.015  # -1.5%
     take_profit_pct = 0.05  # +5%
 
     def generate_signal(self, candles, broker=None):
@@ -40,10 +40,12 @@ class TrendFollowingStrategy(BaseStrategy):
         trend_gap_to_threshold_pct = trend_gap_pct / buy_threshold_pct if buy_threshold_pct > 0 else 0.0
 
         # 포지션이 있으면 청산 조건 먼저 체크
+        position_open = False
         if broker is not None:
             position = broker.positions.get(symbol, {})
             quantity = position.get("quantity", 0.0)
             if quantity > 0:
+                position_open = True
                 average_price = position.get("average_price", 0.0)
                 current_price = latest
                 
@@ -109,6 +111,16 @@ class TrendFollowingStrategy(BaseStrategy):
             "buy_threshold_pct": buy_threshold_pct,
             "trend_gap_to_threshold_pct": round(trend_gap_to_threshold_pct, 4),
         }
+
+        if position_open:
+            return TradeSignal(
+                strategy_name=self.name,
+                symbol=symbol,
+                action="hold",
+                confidence=0.0,
+                reason="position_open_no_exit",
+                meta=meta,
+            )
         
         return TradeSignal(
             strategy_name=self.name,
