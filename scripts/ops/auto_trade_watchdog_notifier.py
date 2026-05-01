@@ -108,23 +108,19 @@ def warning_message(status: dict) -> str:
     )
 
 
-def recovery_message(status: dict) -> str:
-    profile = status.get("profile", {}) or {}
-    selected = profile.get("last_selected_symbols") or []
-    selected_preview = ", ".join(selected[:5]) if selected else "없음"
-    return (
-        "자동매매 watchdog 회복\n"
-        f"마지막 주문 시각: {status.get('last_submitted_at') or '없음'}\n"
-        f"최근 확인 심볼: {selected_preview}"
-    )
-
-
 def _should_notify_for_status(status: dict) -> bool:
     watchdog = status.get("watchdog", {}) or {}
     warnings = set(watchdog.get("warnings") or [])
-    # Ignore normal no-signal periods. Notify only for clearly unhealthy pipeline states.
-    hard_failures = {"zero_evaluated_symbols_streak", "no_nonempty_batch_recently"}
-    if warnings & hard_failures:
+    zero_eval_count = int(status.get("consecutive_zero_evaluated_count") or 0)
+    minutes_since_nonempty = watchdog.get("minutes_since_last_nonempty_batch")
+
+    # Ignore normal no-signal periods and short-lived selector empties.
+    # Notify only when the selector-empty condition persists long enough to look operationally unhealthy.
+    if "zero_evaluated_symbols_streak" in warnings and zero_eval_count >= 5:
+        return True
+    if "no_nonempty_batch_recently" in warnings and zero_eval_count >= 3:
+        return True
+    if minutes_since_nonempty is not None and float(minutes_since_nonempty) >= 30 and zero_eval_count >= 2:
         return True
     return False
 
@@ -144,11 +140,6 @@ def run_once(args: argparse.Namespace, state: NotifyState, state_path: Path) -> 
         state.last_warning_key = warning_key
         state.save(state_path)
         return
-
-    if state.last_health in {"warning", "degraded"} and state.recovery_sent_for != state.last_warning_key:
-        send_message(args.channel, args.target, recovery_message(status), args.dry_run)
-        state.recovery_sent_for = state.last_warning_key
-        state.last_sent_at = datetime.now(timezone.utc).isoformat()
 
     state.last_health = health
     state.last_warning_key = warning_key
