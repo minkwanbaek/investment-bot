@@ -30,3 +30,27 @@ class AlertService:
                     }
                 )
         return alerts
+
+    def evaluate_auto_trade_status(self, status: dict) -> list[dict]:
+        watchdog = status.get("watchdog", {}) or {}
+        warnings = list(watchdog.get("warnings", []) or [])
+        if not warnings:
+            return []
+
+        health = watchdog.get("health", "warning")
+        severity = "critical" if health == "degraded" else "warning"
+        minutes_since_last_submission = watchdog.get("minutes_since_last_submission")
+        minutes_since_last_nonempty_batch = watchdog.get("minutes_since_last_nonempty_batch")
+        return [
+            {
+                "kind": "auto_trade_watchdog",
+                "severity": severity,
+                "message": (
+                    f"auto-trade watchdog {health}: warnings={','.join(warnings)}; "
+                    f"minutes_since_last_submission={minutes_since_last_submission}; "
+                    f"minutes_since_last_nonempty_batch={minutes_since_last_nonempty_batch}"
+                ),
+                "warnings": warnings,
+                "health": health,
+            }
+        ]
