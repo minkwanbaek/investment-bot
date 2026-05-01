@@ -80,32 +80,53 @@ def send_message(channel: str, target: str, message: str, dry_run: bool) -> None
     subprocess.run(cmd, check=True)
 
 
+def _translate_warning_codes(warnings: list[str]) -> str:
+    mapping = {
+        "zero_evaluated_symbols_streak": "평가 심볼 0개 상태가 연속 발생",
+        "consecutive_skip_streak": "연속 스킵 누적",
+        "no_submission_since_start": "시작 후 주문 제출 없음",
+        "no_nonempty_batch_recently": "최근 유효 배치 없음",
+    }
+    return ", ".join(mapping.get(w, w) for w in warnings) if warnings else "원인 미상"
+
+
 def warning_message(status: dict) -> str:
     watchdog = status.get("watchdog", {}) or {}
     profile = status.get("profile", {}) or {}
-    warnings = ", ".join(watchdog.get("warnings") or []) or "unknown"
+    warnings = list(watchdog.get("warnings") or [])
     selected = profile.get("last_selected_symbols") or []
-    selected_preview = ", ".join(selected[:5]) if selected else "none"
+    selected_preview = ", ".join(selected[:5]) if selected else "없음"
+    health_map = {"warning": "경고", "degraded": "심각", "ok": "정상"}
     return (
-        f"auto-trade watchdog {watchdog.get('health','warning')}\n"
-        f"warnings: {warnings}\n"
-        f"last_submitted_at: {status.get('last_submitted_at')}\n"
-        f"consecutive_skip_count: {status.get('consecutive_skip_count')}\n"
-        f"consecutive_zero_evaluated_count: {status.get('consecutive_zero_evaluated_count')}\n"
-        f"minutes_since_last_nonempty_batch: {watchdog.get('minutes_since_last_nonempty_batch')}\n"
-        f"last_selected_symbols: {selected_preview}"
+        f"자동매매 watchdog {health_map.get(watchdog.get('health', 'warning'), watchdog.get('health', 'warning'))}\n"
+        f"사유: {_translate_warning_codes(warnings)}\n"
+        f"마지막 주문 시각: {status.get('last_submitted_at') or '없음'}\n"
+        f"연속 스킵: {status.get('consecutive_skip_count')}회\n"
+        f"연속 0심볼 평가: {status.get('consecutive_zero_evaluated_count')}회\n"
+        f"최근 유효 배치 경과: {watchdog.get('minutes_since_last_nonempty_batch')}분\n"
+        f"최근 확인 심볼: {selected_preview}"
     )
 
 
 def recovery_message(status: dict) -> str:
     profile = status.get("profile", {}) or {}
     selected = profile.get("last_selected_symbols") or []
-    selected_preview = ", ".join(selected[:5]) if selected else "none"
+    selected_preview = ", ".join(selected[:5]) if selected else "없음"
     return (
-        "auto-trade watchdog recovered\n"
-        f"last_submitted_at: {status.get('last_submitted_at')}\n"
-        f"last_selected_symbols: {selected_preview}"
+        "자동매매 watchdog 회복\n"
+        f"마지막 주문 시각: {status.get('last_submitted_at') or '없음'}\n"
+        f"최근 확인 심볼: {selected_preview}"
     )
+
+
+def _should_notify_for_status(status: dict) -> bool:
+    watchdog = status.get("watchdog", {}) or {}
+    warnings = set(watchdog.get("warnings") or [])
+    # Ignore normal no-signal periods. Notify only for clearly unhealthy pipeline states.
+    hard_failures = {"zero_evaluated_symbols_streak", "no_nonempty_batch_recently"}
+    if warnings & hard_failures:
+        return True
+    return False
 
 
 def run_once(args: argparse.Namespace, state: NotifyState, state_path: Path) -> None:
@@ -114,7 +135,7 @@ def run_once(args: argparse.Namespace, state: NotifyState, state_path: Path) -> 
     health = watchdog.get("health", "unknown")
     warning_key = build_warning_key(status)
 
-    if health in {"warning", "degraded"}:
+    if health in {"warning", "degraded"} and _should_notify_for_status(status):
         if should_send_warning(state, warning_key, args.repeat_minutes):
             send_message(args.channel, args.target, warning_message(status), args.dry_run)
             state.last_sent_at = datetime.now(timezone.utc).isoformat()
