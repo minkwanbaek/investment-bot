@@ -19,3 +19,21 @@ def test_run_history_summary_counts_kinds_and_stop_reasons(tmp_path):
     assert summary["kind_counts"]["semi_live_batch"] == 1
     assert summary["stop_reasons"]["max_alerts_reached"] == 1
     assert summary["latest_portfolio"]["order_count"] == 2
+
+
+def test_run_history_summary_prefers_latest_live_account_snapshot(tmp_path):
+    service = RunHistoryService(store=RunHistoryStore(str(tmp_path / "run_history.json")))
+    service.record(kind="semi_live_cycle", payload={"portfolio": {"total_equity": 1111}})
+    service.record(
+        kind="live_experiment_cycle",
+        payload={
+            "account_snapshot": {
+                "before": {"total_asset_value": 100000},
+                "after": {"total_asset_value": 101500},
+            }
+        },
+    )
+
+    summary = service.summarize_recent(limit=10)
+    assert summary["latest_account_snapshot"]["total_asset_value"] == 101500
+    assert summary["latest_portfolio"]["total_equity"] == 1111

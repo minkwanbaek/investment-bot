@@ -212,6 +212,7 @@ def operator_live_dashboard(limit: int = 20) -> dict:
     ledger_payload = LedgerStore(settings.ledger_path).load() or {}
     trade_logs = ledger_payload.get("trade_logs", [])
     summary = MetricsService().summarize_trade_logs_by_dimension(trade_logs)
+    run_summary = get_run_history_service().summarize_recent(limit=limit)
     
     # Build policy snapshot from current settings
     from investment_bot.core.trading_policy import build_trading_policy
@@ -219,7 +220,7 @@ def operator_live_dashboard(limit: int = 20) -> dict:
     snapshot = policy.snapshot
     
     # Extract current state from ledger/paper broker
-    current_state = {
+    paper_state = {
         "consecutive_buys": ledger_payload.get("consecutive_buys", 0),
         "losing_streak": ledger_payload.get("losing_streak", 0),
         "total_equity": ledger_payload.get("cash_balance", 0) + sum(
@@ -228,6 +229,7 @@ def operator_live_dashboard(limit: int = 20) -> dict:
         ),
         "cash_balance": ledger_payload.get("cash_balance", 0),
         "positions_count": len(ledger_payload.get("positions", {})),
+        "state_source": "paper_ledger",
     }
     
     # Convert snapshot to dict for API response
@@ -260,9 +262,11 @@ def operator_live_dashboard(limit: int = 20) -> dict:
         limit=limit,
         policy_snapshot={
             "policy": policy_snapshot_dict,
-            "state": current_state,
+            "state": paper_state,
         },
     )
+    dashboard["paper_state"] = paper_state
+    dashboard["latest_account_snapshot"] = run_summary.get("latest_account_snapshot")
     return dashboard
 
 

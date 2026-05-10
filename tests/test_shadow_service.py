@@ -19,9 +19,21 @@ class FakePaperBroker:
 class FakeSemiLiveService:
     def __init__(self):
         self.trading_cycle_service = type("T", (), {"paper_broker": FakePaperBroker()})()
+        self.calls = []
 
-    def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5):
-        return {"strategy": strategy_name, "symbol": symbol, "timeframe": timeframe, "limit": limit}
+    def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5, record_history: bool = True):
+        self.calls.append({"record_history": record_history})
+        return {
+            "adapter": "live",
+            "strategy": strategy_name,
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "limit": limit,
+            "signal": {"strategy_name": strategy_name, "symbol": symbol, "action": "hold", "confidence": 0.0, "reason": "test"},
+            "review": {"approved": False, "action": "hold", "reason": "test", "target_notional": 0.0, "size_scale": 0.0},
+            "portfolio": {"total_equity": 99999},
+            "broker_result": None,
+        }
 
 
 class FakeUpbitClient:
@@ -51,9 +63,10 @@ class FakeAccountService:
 
 def test_shadow_service_syncs_exchange_balance_into_paper_broker(tmp_path):
     semi_live = FakeSemiLiveService()
+    run_history = RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json')))
     service = ShadowService(
         semi_live_service=semi_live,
-        run_history_service=RunHistoryService(store=RunHistoryStore(str(tmp_path / 'run_history.json'))),
+        run_history_service=run_history,
         upbit_client=FakeUpbitClient(),
         account_service=FakeAccountService(),
     )
@@ -66,3 +79,12 @@ def test_shadow_service_syncs_exchange_balance_into_paper_broker(tmp_path):
     assert synced['quantity'] == 0.25
     assert synced['average_price'] == 100000000.0
     assert synced['cash_balance'] == 12345.0
+    assert semi_live.calls[-1]['record_history'] is False
+    assert 'exchange_balances' not in result
+    assert 'portfolio' not in result['decision']
+
+    recorded = run_history.list_recent(limit=10)
+    assert len(recorded) == 1
+    payload = recorded[0]['payload']
+    assert payload['decision']['signal']['action'] == 'hold'
+    assert 'portfolio' not in payload['decision']

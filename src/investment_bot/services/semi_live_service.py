@@ -11,7 +11,15 @@ class SemiLiveService:
     trading_cycle_service: TradingCycleService
     run_history_service: RunHistoryService
 
-    def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5, candles: list | None = None) -> dict:
+    def run_once(
+        self,
+        strategy_name: str,
+        symbol: str,
+        timeframe: str,
+        limit: int = 5,
+        candles: list | None = None,
+        record_history: bool = True,
+    ) -> dict:
         if candles is None:
             candles = self.market_data_service.get_recent_candles(
                 adapter_name="live",
@@ -26,5 +34,6 @@ class SemiLiveService:
             "limit": limit,
             **self.trading_cycle_service.run(strategy_name=strategy_name, candles=candles),
         }
-        self.run_history_service.record(kind="semi_live_cycle", payload=result)
+        if record_history:
+            self.run_history_service.record(kind="semi_live_cycle", payload=result)
         return result

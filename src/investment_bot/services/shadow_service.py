@@ -34,6 +34,34 @@ class ShadowService:
         self._balances_cache = None
         self._account_cache = None
 
+    def _decision_summary(self, semi_live_result: dict) -> dict:
+        signal = semi_live_result.get("signal") or {}
+        review = semi_live_result.get("review") or {}
+        return {
+            "adapter": semi_live_result.get("adapter"),
+            "symbol": semi_live_result.get("symbol") or signal.get("symbol"),
+            "timeframe": semi_live_result.get("timeframe"),
+            "strategy": semi_live_result.get("strategy") or signal.get("strategy_name"),
+            "signal": {
+                "action": signal.get("action"),
+                "confidence": signal.get("confidence"),
+                "reason": signal.get("reason"),
+            },
+            "review": {
+                "approved": review.get("approved"),
+                "action": review.get("action"),
+                "reason": review.get("reason"),
+                "target_notional": review.get("target_notional"),
+                "size_scale": review.get("size_scale"),
+                "market_regime": review.get("market_regime"),
+                "volatility_state": review.get("volatility_state"),
+                "higher_tf_bias": review.get("higher_tf_bias"),
+                "risk_mode": review.get("risk_mode"),
+                "force_exit": review.get("force_exit"),
+            },
+            "broker_result": semi_live_result.get("broker_result"),
+        }
+
     def run_once(self, strategy_name: str, symbol: str, timeframe: str, limit: int = 5, candles: list | None = None, skip_position_sync: bool = False) -> dict:
         import logging
         logger = logging.getLogger(__name__)
@@ -62,6 +90,7 @@ class ShadowService:
                 timeframe=timeframe,
                 limit=limit,
                 candles=candles,
+                record_history=False,
             )
         except TypeError:
             semi_live_result = self.semi_live_service.run_once(
@@ -69,6 +98,7 @@ class ShadowService:
                 symbol=symbol,
                 timeframe=timeframe,
                 limit=limit,
+                record_history=False,
             )
         t4 = time.time()
         
@@ -105,10 +135,8 @@ class ShadowService:
             "timeframe": timeframe,
             "limit": limit,
             "exchange": "upbit",
-            "exchange_balance_count": len(balances),
-            "exchange_balances": balances,
             "exchange_account_summary": account_summary,
-            "decision": semi_live_result,
+            "decision": self._decision_summary(semi_live_result),
             "live_order_submitted": live_order_submitted,
         }
         self.run_history_service.record(kind="shadow_cycle", payload={
@@ -117,9 +145,8 @@ class ShadowService:
             "symbol": symbol,
             "timeframe": timeframe,
             "limit": limit,
-            "exchange_balance_count": len(balances),
             "exchange_account_summary": account_summary,
-            "decision": semi_live_result,
+            "decision": self._decision_summary(semi_live_result),
             "live_order_submitted": live_order_submitted,
         })
         return payload

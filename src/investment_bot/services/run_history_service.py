@@ -23,6 +23,15 @@ class RunHistoryService:
             if run.get("payload", {}).get("fail_safe", {}).get("stop_reason")
         )
         latest_portfolio = None
+        latest_account_snapshot = None
+        for run in reversed(runs):
+            payload = run.get("payload", {})
+            if run.get("kind") == "live_experiment_cycle":
+                account_snapshot = payload.get("account_snapshot") or {}
+                latest_account_snapshot = account_snapshot.get("after") or account_snapshot.get("before")
+                if latest_account_snapshot:
+                    break
+
         for run in reversed(runs):
             payload = run.get("payload", {})
             if "final_portfolio" in payload:
@@ -36,6 +45,7 @@ class RunHistoryService:
             "total_runs": len(runs),
             "kind_counts": dict(kind_counts),
             "stop_reasons": dict(stop_reasons),
+            "latest_account_snapshot": latest_account_snapshot,
             "latest_portfolio": latest_portfolio,
         }
 

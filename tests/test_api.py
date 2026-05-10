@@ -73,6 +73,8 @@ def test_live_dashboard_endpoint_returns_bundled_operator_payload():
     assert "summary_cards" in body
     assert "equity_curve" in body
     assert "recent_trades" in body
+    assert "paper_state" in body
+    assert body["paper_state"]["state_source"] == "paper_ledger"
 
 
 def test_auto_trade_status_endpoint_returns_profile():
