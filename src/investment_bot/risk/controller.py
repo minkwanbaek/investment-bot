@@ -32,19 +32,32 @@ class RiskController:
             block_reason = "blocked_time_window"
 
         if approved and not force_exit and settings.higher_tf_bias_filter_enabled:
-            if side == "buy" and higher_tf_bias == "bearish":
+            trend_strategy = signal.strategy_name == "trend_following"
+            if trend_strategy and side == "buy" and higher_tf_bias == "bearish":
                 approved = False
                 block_reason = "higher_tf_bias_mismatch"
-            elif side == "sell" and higher_tf_bias == "bullish":
+            elif trend_strategy and side == "sell" and higher_tf_bias == "bullish":
                 approved = False
                 block_reason = "higher_tf_bias_mismatch"
-
-        if approved and not force_exit and policy.snapshot.high_volatility_defense_enabled and volatility_state == "high":
-            position_value_budget *= 0.5
 
         if approved and signal.action == "buy":
-            if cash_balance >= self.base_entry_notional:
+            tp1_executable_entry = 0.0
+            if signal.confidence >= 0.5 and cash_balance >= self.base_entry_notional:
                 position_value_budget = max(position_value_budget, self.base_entry_notional)
+            if (
+                settings.partial_take_profit_enabled
+                and settings.tp1_size_pct > 0
+                and position_value_budget >= self.min_order_notional
+            ):
+                raw_tp1_floor = self.min_order_notional / settings.tp1_size_pct
+                sell_slippage_multiplier = max(1 - (settings.slippage_pct / 100), 0.0)
+                tp1_executable_entry = (
+                    raw_tp1_floor / sell_slippage_multiplier
+                    if sell_slippage_multiplier > 0
+                    else raw_tp1_floor
+                )
+                if position_value_budget >= raw_tp1_floor and cash_balance >= tp1_executable_entry:
+                    position_value_budget = max(position_value_budget, tp1_executable_entry)
             elif cash_balance >= self.min_order_notional:
                 position_value_budget = max(position_value_budget, self.min_order_notional)
 
@@ -56,7 +69,10 @@ class RiskController:
 
         allowed_risk = cash_balance * settings.risk_control_risk_per_trade_pct
         if not (approved and force_exit and signal.action == "sell"):
-            position_value_budget = min(position_value_budget, max(allowed_risk * 10, self.min_order_notional))
+            risk_cap = max(allowed_risk * 10, self.min_order_notional)
+            if approved and signal.action == "buy" and tp1_executable_entry > 0 and cash_balance >= tp1_executable_entry:
+                risk_cap = max(risk_cap, tp1_executable_entry)
+            position_value_budget = min(position_value_budget, risk_cap)
             position_value_budget *= policy.snapshot.volatility_size_multipliers.get(volatility_state, 1.0)
 
         losing_streak = int(signal_meta.get("losing_streak", 0) or 0)
@@ -66,6 +82,30 @@ class RiskController:
         elif losing_streak >= settings.losing_streak_threshold_reduced:
             risk_mode = "reduced"
         position_value_budget *= settings.risk_mode_multipliers.get(risk_mode, 1.0)
+
+        if (
+            approved
+            and signal.action == "buy"
+            and risk_mode == "normal"
+            and tp1_executable_entry > 0
+            and 0 < position_value_budget < tp1_executable_entry
+            and cash_balance >= tp1_executable_entry
+        ):
+            position_value_budget = tp1_executable_entry
+
+        if (
+            approved
+            and signal.action == "buy"
+            and risk_mode == "normal"
+            and 0 < position_value_budget < self.min_order_notional
+            and cash_balance >= self.min_order_notional
+        ):
+            position_value_budget = self.min_order_notional
+
+        if approved and signal.action == "buy":
+            buy_cost_multiplier = (1 + (settings.slippage_pct / 100)) * (1 + (settings.trading_fee_pct / 100))
+            max_affordable_notional = cash_balance / buy_cost_multiplier if buy_cost_multiplier > 0 else cash_balance
+            position_value_budget = min(position_value_budget, max_affordable_notional)
 
         size_scale = round((position_value_budget / latest_price), 8) if approved and latest_price > 0 else 0.0
         return {

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import logging
+import math
 import threading
 import time
 
@@ -102,21 +103,28 @@ class AutoTradeService:
             return self._remember(result, record_kind="auto_trade_skip")
 
         symbols = self.settings.symbols
+        dynamic_symbols_selected = False
         if self.settings.dynamic_symbol_selection and self.dynamic_symbol_selector:
             symbols = self.dynamic_symbol_selector.select(
                 symbols=self.settings.symbols,
                 timeframe=self.settings.auto_trade_timeframe,
                 top_n=self.settings.dynamic_symbol_top_n,
             )
+            dynamic_symbols_selected = True
+            held_symbols = self._held_symbols_for_exit_scan(account=account, symbols=self.settings.symbols)
+            for symbol in held_symbols:
+                if symbol not in symbols:
+                    symbols.append(symbol)
 
         # Maintainability note:
         # Evaluating all symbols on every cycle is too slow for 42 symbols × 3 strategies.
         # Use a priority + rotating-batch scheduler so top symbols are checked every cycle,
         # while the remaining symbols are covered across subsequent cycles without background threads.
         if self._scheduler is None or self._scheduler.all_symbols != list(symbols):
-            # Operational default: evaluate only top-10 symbols each cycle for responsiveness.
+            priority_count = len(symbols) if dynamic_symbols_selected else min(len(symbols), max(1, int(self.settings.dynamic_symbol_top_n)))
+            # Operational default: evaluate the configured top-N symbols each cycle for responsiveness.
             # Remaining symbols are covered in future incremental refactors/configurable scheduling.
-            self._scheduler = AutoTradeScheduler(all_symbols=list(symbols), priority_count=10, batch_size=0)
+            self._scheduler = AutoTradeScheduler(all_symbols=list(symbols), priority_count=priority_count, batch_size=0)
 
         batch_symbols = self._scheduler.get_priority_symbols()
         self._last_selected_symbols = list(batch_symbols)
@@ -141,6 +149,9 @@ class AutoTradeService:
         )
 
         sell_candidates = [c for c in candidates if c["action"] == "sell"]
+        buy_candidates = [c for c in candidates if c["action"] == "buy"]
+        ranked_buys = sorted(buy_candidates, key=lambda c: c["score"], reverse=True)
+        executable_buys = [c for c in ranked_buys if self._buy_candidate_is_executable(c, krw_cash=krw_cash, account=account)]
         if sell_candidates:
             # Filter out unmanaged dust SELL candidates early to reduce noise and let BUY candidates be evaluated.
             # Managed positions and protective overrides must still reach _handle_sell(), even when the order
@@ -150,6 +161,11 @@ class AutoTradeService:
                 asset = c.get("asset", {})
                 estimated_value = float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
                 near_managed_threshold = self.settings.auto_trade_min_managed_position_notional * 0.95
+                available_volume = float(asset.get("balance", 0.0) or 0.0)
+                full_sell_notional = float(c.get("latest_price", 0.0) or 0.0) * available_volume
+                exchange_actionable = full_sell_notional >= self.settings.min_order_notional
+                if buy_candidates and not exchange_actionable:
+                    continue
                 if (
                     c.get("override") is not None
                     or asset.get("managed") is True
@@ -158,15 +174,36 @@ class AutoTradeService:
                 ):
                     non_dust_sells.append(c)
             if non_dust_sells:
-                chosen = max(non_dust_sells, key=lambda c: (1 if c["override"] else 0, c["score"]))
+                chosen = max(non_dust_sells, key=lambda c: (self._sell_candidate_priority(c), c["score"]))
+                override_reason = (chosen.get("override") or {}).get("override_reason")
+                if override_reason != "stop_loss" and executable_buys and executable_buys[0]["score"] > chosen["score"]:
+                    chosen_buy = executable_buys[0]
+                    logger.info(
+                        "buy candidate chosen over weak sell | buy_symbol=%s buy_score=%.4f sell_symbol=%s sell_score=%.4f",
+                        chosen_buy["symbol"],
+                        chosen_buy["score"],
+                        chosen["symbol"],
+                        chosen["score"],
+                    )
+                    return self._handle_buy(chosen_buy, krw_cash=krw_cash, account=account)
                 logger.info("sell candidate chosen | symbol=%s score=%.4f override=%s", chosen["symbol"], chosen["score"], chosen.get("override"))
                 return self._handle_sell(chosen)
             else:
                 logger.info("sell candidates filtered out: all dust positions below meaningful_order_notional")
 
-        buy_candidates = [c for c in candidates if c["action"] == "buy"]
         if buy_candidates:
-            chosen = max(buy_candidates, key=lambda c: c["score"])
+            if executable_buys:
+                first_blocked_result = None
+                for chosen in executable_buys:
+                    logger.info("buy candidate chosen | symbol=%s score=%.4f confidence=%.4f", chosen["symbol"], chosen["score"], chosen["confidence"])
+                    result = self._handle_buy(chosen, krw_cash=krw_cash, account=account)
+                    if result.get("status") == "skipped" and result.get("reason") == "preview_blocked":
+                        first_blocked_result = first_blocked_result or result
+                        logger.info("buy candidate preview blocked; trying next executable buy | symbol=%s", chosen["symbol"])
+                        continue
+                    return result
+                return first_blocked_result
+            chosen = ranked_buys[0]
             logger.info("buy candidate chosen | symbol=%s score=%.4f confidence=%.4f", chosen["symbol"], chosen["score"], chosen["confidence"])
             return self._handle_buy(chosen, krw_cash=krw_cash, account=account)
 
@@ -342,13 +379,21 @@ class AutoTradeService:
             # adds up across 42 symbols. Cache at symbol level, not strategy level.
             latest_price = float(review.get("latest_price", 0.0) or 0.0)
             managed_notional = float(asset_base.get("estimated_cost_basis", 0.0) or 0.0)
+            available_volume = float(asset_base.get("balance", 0.0) or 0.0)
+            full_sell_notional = latest_price * available_volume
+            review_action = review.get("action")
             if managed_notional < self.settings.auto_trade_min_managed_position_notional:
                 asset = {**asset_base, "managed": False, "managed_notional": managed_notional}
                 override = None
+                action = "hold" if review_action == "sell" else review_action
             else:
                 asset = {**asset_base, "managed": True, "managed_notional": managed_notional}
-                override = self._exit_override(symbol=symbol, asset=asset, latest_price=latest_price)
-            action = override["action"] if override is not None else review.get("action")
+                if full_sell_notional < self.settings.min_order_notional:
+                    override = None
+                    action = "hold" if review_action in {"sell", "hold"} else review_action
+                else:
+                    override = self._exit_override(symbol=symbol, asset=asset, latest_price=latest_price)
+                    action = override["action"] if override is not None else review_action
             score = self._score_candidate(action=action, confidence=float(review.get("confidence", 0.0) or 0.0), review=review)
             collected.append({
                 "symbol": symbol,
@@ -388,14 +433,119 @@ class AutoTradeService:
         target_notional = float(review.get("target_notional", 0.0) or 0.0)
         return round(confidence * 100 + min(target_notional / 1000.0, 20.0), 6)
 
+    def _summarize_shadow(self, shadow: dict | None) -> dict | None:
+        if not shadow:
+            return None
+        decision = shadow.get("decision") or {}
+        signal = decision.get("signal") or {}
+        review = decision.get("review") or {}
+        return {
+            "mode": shadow.get("mode"),
+            "symbol": shadow.get("symbol") or decision.get("symbol") or signal.get("symbol"),
+            "strategy": shadow.get("strategy_name") or decision.get("strategy") or signal.get("strategy_name"),
+            "timeframe": shadow.get("timeframe"),
+            "signal": {
+                "action": signal.get("action"),
+                "confidence": signal.get("confidence"),
+                "reason": signal.get("reason"),
+            },
+            "review": {
+                "approved": review.get("approved"),
+                "action": review.get("action"),
+                "reason": review.get("reason"),
+                "target_notional": review.get("target_notional"),
+                "size_scale": review.get("size_scale"),
+                "market_regime": review.get("market_regime"),
+                "volatility_state": review.get("volatility_state"),
+                "higher_tf_bias": review.get("higher_tf_bias"),
+                "risk_mode": review.get("risk_mode"),
+                "force_exit": review.get("force_exit"),
+            },
+            "live_order_submitted": shadow.get("live_order_submitted"),
+        }
+
+    def _summarize_candidate(self, chosen: dict | None) -> dict | None:
+        if not chosen:
+            return None
+        review = chosen.get("review") or {}
+        return {
+            "symbol": chosen.get("symbol"),
+            "strategy_name": chosen.get("strategy_name"),
+            "action": chosen.get("action"),
+            "confidence": chosen.get("confidence"),
+            "latest_price": chosen.get("latest_price"),
+            "score": chosen.get("score"),
+            "override": chosen.get("override"),
+            "review": {
+                "approved": review.get("approved"),
+                "action": review.get("action"),
+                "reason": review.get("reason"),
+                "target_notional": review.get("target_notional"),
+                "size_scale": review.get("size_scale"),
+                "market_regime": review.get("market_regime"),
+                "volatility_state": review.get("volatility_state"),
+                "higher_tf_bias": review.get("higher_tf_bias"),
+                "risk_mode": review.get("risk_mode"),
+                "force_exit": review.get("force_exit"),
+            },
+        }
+
+    def _sell_candidate_priority(self, candidate: dict) -> int:
+        override = candidate.get("override")
+        if override is None:
+            return 0
+        if override.get("override_reason") == "stop_loss":
+            return 2
+        return 1
+
+    def _buy_candidate_is_executable(self, chosen: dict, krw_cash: float, account: dict) -> bool:
+        if krw_cash < self.settings.auto_trade_min_krw_balance:
+            return False
+        review = chosen["review"]
+        reviewed_target = float(review.get("target_notional", 0.0) or 0.0)
+        if reviewed_target < self.settings.min_order_notional:
+            return False
+        current_exposure = sum(float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0) for asset in account.get("assets", []))
+        total_equity = krw_cash + current_exposure
+        allocation_cap = min(krw_cash * (self.settings.auto_trade_target_allocation_pct / 100), krw_cash)
+        target_notional = min(allocation_cap, reviewed_target if reviewed_target > 0 else allocation_cap)
+        max_total_exposure_value = total_equity * (self.settings.auto_trade_max_total_exposure_pct / 100)
+        remaining_exposure_room = max(0.0, max_total_exposure_value - current_exposure)
+        target_notional = min(target_notional, remaining_exposure_room)
+        target_notional = max(target_notional, self.settings.min_order_notional) if remaining_exposure_room >= self.settings.min_order_notional else target_notional
+        symbol_exposure = self._symbol_exposure_value(account=account, symbol=chosen["symbol"])
+        max_symbol_exposure_value = total_equity * (self.settings.max_symbol_exposure_pct / 100)
+        remaining_symbol_room = max(0.0, max_symbol_exposure_value - symbol_exposure)
+        target_notional = min(target_notional, remaining_symbol_room)
+        target_notional = min(target_notional, self._max_buy_notional_after_fee(krw_cash))
+        return target_notional >= self.settings.auto_trade_meaningful_order_notional
+
+    def _held_symbols_for_exit_scan(self, account: dict, symbols: list[str]) -> list[str]:
+        configured = {symbol.split("/")[0]: symbol for symbol in symbols}
+        held = []
+        min_exit_scan_notional = min(
+            self.settings.auto_trade_min_managed_position_notional,
+            self.settings.min_order_notional,
+        )
+        for asset in account.get("assets", []):
+            currency = asset.get("currency")
+            symbol = asset.get("symbol") or configured.get(currency)
+            if symbol not in symbols or symbol in held:
+                continue
+            estimated_value = float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
+            if estimated_value >= min_exit_scan_notional:
+                held.append(symbol)
+        return held
+
     def _handle_buy(self, chosen: dict, krw_cash: float, account: dict) -> dict:
+        chosen_summary = self._summarize_candidate(chosen)
         if krw_cash < self.settings.auto_trade_min_krw_balance:
             result = {
                 "status": "skipped",
                 "reason": "insufficient_krw_balance",
                 "krw_cash": krw_cash,
                 "required_min_krw": self.settings.auto_trade_min_krw_balance,
-                "chosen": chosen,
+                "chosen": chosen_summary,
             }
             return self._remember(result, record_kind="auto_trade_skip")
         current_exposure = sum(float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0) for asset in account.get("assets", []))
@@ -403,21 +553,42 @@ class AutoTradeService:
         allocation_cap = min(krw_cash * (self.settings.auto_trade_target_allocation_pct / 100), krw_cash)
         review = chosen["review"]
         reviewed_target = float(review.get("target_notional", 0.0) or 0.0)
+        if reviewed_target < self.settings.min_order_notional:
+            result = {
+                "status": "skipped",
+                "reason": "risk_sized_below_min_order_notional",
+                "target_notional": round(reviewed_target, 4),
+                "min_order_notional": self.settings.min_order_notional,
+                "chosen": chosen_summary,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
         target_notional = min(allocation_cap, reviewed_target if reviewed_target > 0 else allocation_cap)
         max_total_exposure_value = total_equity * (self.settings.auto_trade_max_total_exposure_pct / 100)
         remaining_exposure_room = max(0.0, max_total_exposure_value - current_exposure)
         target_notional = min(target_notional, remaining_exposure_room)
         target_notional = max(target_notional, self.settings.min_order_notional) if remaining_exposure_room >= self.settings.min_order_notional else target_notional
-        target_notional = min(target_notional, krw_cash)
+        symbol_exposure = self._symbol_exposure_value(account=account, symbol=chosen["symbol"])
+        max_symbol_exposure_value = total_equity * (self.settings.max_symbol_exposure_pct / 100)
+        remaining_symbol_room = max(0.0, max_symbol_exposure_value - symbol_exposure)
+        target_notional = min(target_notional, remaining_symbol_room)
+        target_notional = min(target_notional, self._max_buy_notional_after_fee(krw_cash))
         if target_notional < self.settings.auto_trade_meaningful_order_notional:
-            blocker = "total_exposure_limit" if remaining_exposure_room < self.settings.auto_trade_meaningful_order_notional else "meaningful_order_notional"
+            if remaining_exposure_room < self.settings.auto_trade_meaningful_order_notional:
+                blocker = "total_exposure_limit"
+            elif remaining_symbol_room < self.settings.auto_trade_meaningful_order_notional:
+                blocker = "symbol_exposure_limit"
+            else:
+                blocker = "meaningful_order_notional"
             logger.info(
-                "run_once skipped: below_meaningful_order_notional_or_total_exposure_limit | blocker=%s target_notional=%.4f remaining_exposure_room=%.4f current_exposure=%.4f max_total_exposure_value=%.4f",
+                "run_once skipped: below_meaningful_order_notional_or_exposure_limit | blocker=%s target_notional=%.4f remaining_exposure_room=%.4f remaining_symbol_room=%.4f current_exposure=%.4f symbol_exposure=%.4f max_total_exposure_value=%.4f max_symbol_exposure_value=%.4f",
                 blocker,
                 target_notional,
                 remaining_exposure_room,
+                remaining_symbol_room,
                 current_exposure,
+                symbol_exposure,
                 max_total_exposure_value,
+                max_symbol_exposure_value,
             )
             result = {
                 "status": "skipped",
@@ -425,17 +596,35 @@ class AutoTradeService:
                 "blocker": blocker,
                 "target_notional": round(target_notional, 4),
                 "remaining_exposure_room": round(remaining_exposure_room, 4),
+                "remaining_symbol_room": round(remaining_symbol_room, 4),
                 "meaningful_order_notional": self.settings.auto_trade_meaningful_order_notional,
                 "current_exposure": round(current_exposure, 4),
+                "symbol_exposure": round(symbol_exposure, 4),
                 "max_total_exposure_value": round(max_total_exposure_value, 4),
-                "chosen": chosen,
+                "max_symbol_exposure_value": round(max_symbol_exposure_value, 4),
+                "chosen": chosen_summary,
             }
             return self._remember(result, record_kind="auto_trade_skip")
         price = chosen["latest_price"]
-        volume = round(target_notional / price, 8)
-        return self._submit_trade(symbol=chosen["symbol"], action="buy", price=price, volume=volume, shadow=chosen["shadow"], override=chosen["override"], extra={"chosen": chosen})
+        volume = math.floor((target_notional / price) * 100_000_000) / 100_000_000
+        return self._submit_trade(symbol=chosen["symbol"], action="buy", price=price, volume=volume, shadow=chosen["shadow"], override=chosen["override"], extra={"chosen": chosen_summary})
+
+    def _symbol_exposure_value(self, account: dict, symbol: str) -> float:
+        currency = symbol.split("/")[0]
+        exposure = 0.0
+        for asset in account.get("assets", []):
+            asset_symbol = asset.get("symbol")
+            asset_currency = asset.get("currency")
+            if asset_symbol == symbol or asset_currency == currency:
+                exposure += float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
+        return exposure
+
+    def _max_buy_notional_after_fee(self, krw_cash: float) -> float:
+        fee_multiplier = 1 + (self.settings.trading_fee_pct / 100)
+        return krw_cash / fee_multiplier if fee_multiplier > 0 else krw_cash
 
     def _handle_sell(self, chosen: dict) -> dict:
+        chosen_summary = self._summarize_candidate(chosen)
         asset = chosen["asset"]
         # Skip dust positions early to reduce SELL noise in logs and BUY evaluation blocking
         if asset.get("managed") is False:
@@ -451,7 +640,7 @@ class AutoTradeService:
                 "reason": "below_min_managed_position_notional",
                 "managed_notional": round(managed_notional, 4),
                 "min_managed_position_notional": self.settings.auto_trade_min_managed_position_notional,
-                "chosen": chosen,
+                "chosen": chosen_summary,
             }
             return self._remember(result, record_kind="auto_trade_skip")
         available_volume = float(asset.get("balance", 0.0))
@@ -460,21 +649,34 @@ class AutoTradeService:
                 "status": "skipped",
                 "reason": "insufficient_asset_balance",
                 "available_volume": available_volume,
-                "chosen": chosen,
+                "chosen": chosen_summary,
             }
             return self._remember(result, record_kind="auto_trade_skip")
         sell_ratio = float(chosen["override"].get("sell_ratio", 1.0)) if chosen["override"] is not None else min(max(chosen["confidence"], 0.25), 1.0)
         volume = round(available_volume * sell_ratio, 8)
+        if chosen["latest_price"] * volume < self.settings.min_order_notional <= chosen["latest_price"] * available_volume:
+            volume = round(available_volume, 8)
         if volume <= 0:
             result = {
                 "status": "skipped",
                 "reason": "sell_volume_zero_after_sizing",
                 "available_volume": available_volume,
                 "sell_ratio": sell_ratio,
-                "chosen": chosen,
+                "chosen": chosen_summary,
             }
             return self._remember(result, record_kind="auto_trade_skip")
-        return self._submit_trade(symbol=chosen["symbol"], action="sell", price=chosen["latest_price"], volume=volume, shadow=chosen["shadow"], override=chosen["override"], extra={"chosen": chosen})
+        sell_notional = chosen["latest_price"] * volume
+        if sell_notional < self.settings.min_order_notional:
+            result = {
+                "status": "skipped",
+                "reason": "sell_below_min_order_notional",
+                "target_notional": round(sell_notional, 4),
+                "min_order_notional": self.settings.min_order_notional,
+                "available_volume": available_volume,
+                "chosen": chosen_summary,
+            }
+            return self._remember(result, record_kind="auto_trade_skip")
+        return self._submit_trade(symbol=chosen["symbol"], action="sell", price=chosen["latest_price"], volume=volume, shadow=chosen["shadow"], override=chosen["override"], extra={"chosen": chosen_summary})
 
     def _exit_override(self, symbol: str, asset: dict, latest_price: float) -> dict | None:
         balance = float(asset.get("balance", 0.0) or 0.0)
@@ -486,23 +688,26 @@ class AutoTradeService:
         peak = max(peak, latest_price)
         self._peak_price_by_symbol[symbol] = peak
         pnl_pct = ((latest_price - avg_buy_price) / avg_buy_price) * 100
+        peak_pnl_pct = ((peak - avg_buy_price) / avg_buy_price) * 100
         drawdown_from_peak_pct = ((peak - latest_price) / peak) * 100 if peak > 0 else 0.0
         if pnl_pct <= -self.settings.auto_trade_stop_loss_pct:
             return {"action": "sell", "override_reason": "stop_loss", "sell_ratio": 1.0, "pnl_pct": round(pnl_pct, 4), "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4)}
-        if pnl_pct >= self.settings.auto_trade_partial_take_profit_pct and drawdown_from_peak_pct >= self.settings.auto_trade_trailing_stop_pct:
+        if peak_pnl_pct >= self.settings.auto_trade_partial_take_profit_pct and pnl_pct > 0 and drawdown_from_peak_pct >= self.settings.auto_trade_trailing_stop_pct:
             return {"action": "sell", "override_reason": "take_profit_trailing_stop", "sell_ratio": self.settings.auto_trade_partial_sell_ratio, "pnl_pct": round(pnl_pct, 4), "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4)}
         return None
 
     def _submit_trade(self, symbol: str, action: str, price: float, volume: float, shadow: dict, override: dict | None = None, extra: dict | None = None) -> dict:
         preview = self.live_execution_service.preview_order(symbol=symbol, side=action, price=price, volume=volume)
+        decision_summary = self._summarize_shadow(shadow)
         if not preview.get("allowed"):
             logger.warning("trade preview blocked | symbol=%s side=%s price=%.2f volume=%.8f", symbol, action, price, volume)
-            result = {"status": "skipped", "reason": "preview_blocked", "preview": preview, "shadow": shadow, "override": override, **(extra or {})}
+            result = {"status": "skipped", "reason": "preview_blocked", "preview": preview, "decision": decision_summary, "override": override, **(extra or {})}
             return self._remember(result, record_kind="auto_trade_skip")
         submit = self.live_execution_service.submit_order(symbol=symbol, side=action, price=price, volume=volume)
-        self._last_submitted_at = datetime.now(timezone.utc)
+        if action == "buy":
+            self._last_submitted_at = datetime.now(timezone.utc)
         logger.info("trade submitted | symbol=%s side=%s price=%.2f volume=%.8f", symbol, action, price, volume)
-        result = {"status": "submitted", "symbol": symbol, "side": action, "shadow": shadow, "preview": preview, "submit": submit, "override": override, **(extra or {})}
+        result = {"status": "submitted", "symbol": symbol, "side": action, "decision": decision_summary, "preview": preview, "submit": submit, "override": override, **(extra or {})}
         return self._remember(result, record_kind="auto_trade_submit")
 
     def _cooldown_active(self) -> bool:

@@ -3,7 +3,13 @@ from investment_bot.risk.controller import RiskController
 from investment_bot.services.paper_broker import PaperBroker
 
 
-def test_risk_controller_sizes_from_cash_balance_and_price():
+def test_risk_controller_sizes_from_cash_balance_and_price(monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "risk_control_risk_per_trade_pct", 0.005)
+
     controller = RiskController(max_confidence_position_scale=0.1)
     signal = TradeSignal(
         strategy_name="trend_following",
@@ -33,6 +39,187 @@ def test_risk_controller_floors_buy_to_min_order_notional_when_cash_allows():
 
     assert review["target_notional"] == 5000
     assert review["size_scale"] == 5.0
+
+
+def test_risk_controller_does_not_base_floor_weak_confidence_buy():
+    controller = RiskController(max_confidence_position_scale=0.075, min_order_notional=5000, base_entry_notional=10000)
+    signal = TradeSignal(
+        strategy_name="trend_following",
+        symbol="BTC/KRW",
+        action="buy",
+        confidence=0.2,
+        reason="weak buy",
+    )
+
+    review = controller.review(signal, cash_balance=100000, latest_price=1000)
+
+    assert review["target_notional"] == 5000
+    assert review["size_scale"] == 5.0
+
+
+def test_risk_controller_sizes_actionable_buy_for_executable_tp1_slice(monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "partial_take_profit_enabled", True)
+    monkeypatch.setattr(settings, "tp1_size_pct", 0.20)
+    monkeypatch.setattr(settings, "risk_control_risk_per_trade_pct", 0.01)
+    monkeypatch.setattr(settings, "volatility_size_multipliers", {"normal": 1.0})
+    monkeypatch.setattr(settings, "risk_mode_multipliers", {"normal": 1.0})
+
+    controller = RiskController(max_confidence_position_scale=0.075, min_order_notional=5000, base_entry_notional=10000)
+    signal = TradeSignal(
+        strategy_name="mean_reversion",
+        symbol="ONDO/KRW",
+        action="buy",
+        confidence=0.3,
+        reason="range rebound",
+    )
+    signal.meta = {"volatility_state": "normal", "losing_streak": 0}
+
+    review = controller.review(signal, cash_balance=250_000, latest_price=1000)
+
+    assert review["target_notional"] == 25012.5063
+    assert review["target_notional"] * settings.tp1_size_pct >= settings.min_order_notional
+    assert review["size_scale"] == 25.01250625
+
+
+def test_risk_controller_preserves_tp1_floor_through_risk_cap(monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "partial_take_profit_enabled", True)
+    monkeypatch.setattr(settings, "tp1_size_pct", 0.20)
+    monkeypatch.setattr(settings, "risk_control_risk_per_trade_pct", 0.01)
+    monkeypatch.setattr(settings, "volatility_size_multipliers", {"normal": 1.0})
+    monkeypatch.setattr(settings, "risk_mode_multipliers", {"normal": 1.0})
+
+    controller = RiskController(max_confidence_position_scale=1.0, min_order_notional=5000, base_entry_notional=10000)
+    signal = TradeSignal(
+        strategy_name="mean_reversion",
+        symbol="ONDO/KRW",
+        action="buy",
+        confidence=0.72,
+        reason="range rebound",
+    )
+    signal.meta = {"volatility_state": "normal", "losing_streak": 0}
+
+    review = controller.review(signal, cash_balance=50_000, latest_price=1000)
+
+    assert review["target_notional"] == 25012.5063
+    assert review["target_notional"] * settings.tp1_size_pct >= settings.min_order_notional
+    assert review["size_scale"] == 25.01250625
+
+
+def test_risk_controller_preserves_executable_min_order_after_high_volatility_haircut(monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "blocked_hours", [])
+    monkeypatch.setattr(settings, "high_volatility_defense_enabled", True)
+    monkeypatch.setattr(settings, "volatility_size_multipliers", {"low": 1.0, "normal": 1.0, "high": 0.5})
+    monkeypatch.setattr(settings, "risk_control_risk_per_trade_pct", 0.01)
+
+    controller = RiskController(max_confidence_position_scale=0.075, min_order_notional=5000, base_entry_notional=10000)
+    signal = TradeSignal(
+        strategy_name="trend_following",
+        symbol="BTC/KRW",
+        action="buy",
+        confidence=0.49,
+        reason="high-vol continuation",
+    )
+    signal.meta = {"volatility_state": "high", "losing_streak": 0}
+
+    review = controller.review(signal, cash_balance=100000, latest_price=1000)
+
+    assert review["target_notional"] == 5000
+    assert review["size_scale"] == 5.0
+
+
+def test_risk_controller_preserves_tp1_floor_after_high_volatility_haircut(monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "blocked_hours", [])
+    monkeypatch.setattr(settings, "partial_take_profit_enabled", True)
+    monkeypatch.setattr(settings, "tp1_size_pct", 0.20)
+    monkeypatch.setattr(settings, "high_volatility_defense_enabled", True)
+    monkeypatch.setattr(settings, "volatility_size_multipliers", {"low": 1.0, "normal": 1.0, "high": 0.10})
+    monkeypatch.setattr(settings, "risk_control_risk_per_trade_pct", 0.01)
+    monkeypatch.setattr(settings, "risk_mode_multipliers", {"normal": 1.0, "reduced": 0.5, "minimal": 0.25})
+
+    controller = RiskController(max_confidence_position_scale=0.075, min_order_notional=5000, base_entry_notional=25013)
+    signal = TradeSignal(
+        strategy_name="trend_following",
+        symbol="BTC/KRW",
+        action="buy",
+        confidence=0.72,
+        reason="high-vol actionable breakout",
+    )
+    signal.meta = {"volatility_state": "high", "losing_streak": 0}
+
+    review = controller.review(signal, cash_balance=250_000, latest_price=1000)
+
+    assert review["target_notional"] == 25012.5063
+    assert review["target_notional"] * settings.tp1_size_pct * (1 - settings.slippage_pct / 100) >= settings.min_order_notional
+    assert abs((review["size_scale"] * review["latest_price"]) - review["target_notional"]) < 0.0001
+
+
+def test_high_volatility_size_uses_configured_multiplier_once(monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "blocked_hours", [])
+    monkeypatch.setattr(settings, "high_volatility_defense_enabled", True)
+    monkeypatch.setattr(settings, "volatility_size_multipliers", {"low": 1.0, "normal": 1.0, "high": 0.5})
+    monkeypatch.setattr(settings, "risk_control_risk_per_trade_pct", 0.01)
+
+    controller = RiskController(max_confidence_position_scale=0.1, min_order_notional=5000, base_entry_notional=10000)
+    signal = TradeSignal(
+        strategy_name="trend_following",
+        symbol="BTC/KRW",
+        action="buy",
+        confidence=1.0,
+        reason="high-vol breakout",
+    )
+    signal.meta = {"volatility_state": "high", "losing_streak": 0}
+
+    review = controller.review(signal, cash_balance=10_000_000, latest_price=1000)
+
+    assert review["target_notional"] == 500000
+    assert review["size_scale"] == 500.0
+
+
+def test_losing_streak_risk_mode_can_reduce_below_min_order(monkeypatch):
+    from investment_bot.core.settings import get_settings
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "blocked_hours", [])
+    monkeypatch.setattr(settings, "risk_control_risk_per_trade_pct", 0.01)
+    monkeypatch.setattr(settings, "losing_streak_threshold_reduced", 2)
+    monkeypatch.setattr(settings, "risk_mode_multipliers", {"normal": 1.0, "reduced": 0.5, "minimal": 0.25})
+
+    controller = RiskController(max_confidence_position_scale=0.075, min_order_notional=5000, base_entry_notional=10000)
+    signal = TradeSignal(
+        strategy_name="trend_following",
+        symbol="BTC/KRW",
+        action="buy",
+        confidence=0.49,
+        reason="post-loss continuation",
+    )
+    signal.meta = {"volatility_state": "normal", "losing_streak": 2}
+
+    review = controller.review(signal, cash_balance=100000, latest_price=1000)
+
+    assert review["risk_mode"] == "reduced"
+    assert review["target_notional"] == 2500
+    assert review["size_scale"] == 2.5
 
 
 def test_broker_rejects_buy_when_symbol_exposure_limit_is_reached():

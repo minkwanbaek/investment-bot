@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -34,6 +35,7 @@ class PaperBroker:
         self.max_symbol_exposure_pct = max_symbol_exposure_pct
         self.min_meaningful_position_notional = max(min_order_notional, 5000)
         self.consecutive_buys = 0
+        self.consecutive_buys_by_symbol: dict[str, int] = {}
         self.losing_streak = 0
         self.ledger_store = ledger_store
         self._load_state()
@@ -58,6 +60,17 @@ class PaperBroker:
             position['quantity'] = 0.0
             position['average_price'] = 0.0
 
+    def _current_total_equity(self, symbol: str | None = None, market_price: float | None = None) -> float:
+        total_position_value = 0.0
+        for position_symbol, position in self.positions.items():
+            qty = max((position or {}).get("quantity", 0.0), 0.0)
+            if position_symbol == symbol and market_price is not None:
+                ref_price = market_price
+            else:
+                ref_price = self.last_prices.get(position_symbol, (position or {}).get("average_price", 0.0))
+            total_position_value += qty * max(ref_price or 0.0, 0.0)
+        return round(self.cash_balance + total_position_value, 4)
+
     def _load_state(self) -> None:
         if not self.ledger_store:
             return
@@ -69,16 +82,20 @@ class PaperBroker:
         self.last_prices = payload.get("last_prices", {})
         self.total_realized_pnl = payload.get("total_realized_pnl", 0.0)
         self.consecutive_buys = payload.get("consecutive_buys", 0)
+        self.consecutive_buys_by_symbol = payload.get("consecutive_buys_by_symbol", {})
         self.losing_streak = payload.get("losing_streak", 0)
         self.orders = [PaperOrder.model_validate(order) for order in payload.get("orders", [])]
-        meaningful_positions = 0
+        meaningful_symbols = []
         for symbol, position in self.positions.items():
             qty = max((position or {}).get("quantity", 0.0), 0.0)
             avg = max((position or {}).get("average_price", 0.0), 0.0)
             if qty * avg >= self.min_meaningful_position_notional:
-                meaningful_positions += 1
-        if meaningful_positions == 0:
+                meaningful_symbols.append(symbol)
+        if len(meaningful_symbols) == 0:
             self.consecutive_buys = 0
+            self.consecutive_buys_by_symbol = {}
+        elif not self.consecutive_buys_by_symbol and len(meaningful_symbols) == 1 and self.consecutive_buys > 0:
+            self.consecutive_buys_by_symbol = {meaningful_symbols[0]: self.consecutive_buys}
 
     def _persist_state(self) -> None:
         if not self.ledger_store:
@@ -93,6 +110,7 @@ class PaperBroker:
                 "last_prices": self.last_prices,
                 "total_realized_pnl": self.total_realized_pnl,
                 "consecutive_buys": self.consecutive_buys,
+                "consecutive_buys_by_symbol": self.consecutive_buys_by_symbol,
                 "losing_streak": self.losing_streak,
                 "orders": [order.model_dump() for order in self.orders],
                 "portfolio": self.portfolio_snapshot(),
@@ -120,14 +138,19 @@ class PaperBroker:
             self.cash_balance = round(max(cash_balance, 0.0), 4)
         self._persist_state()
 
-    def submit(self, reviewed_signal: dict, execution_price: float) -> dict:
+    def submit(self, reviewed_signal: dict, execution_price: float, now: datetime | None = None) -> dict:
+        now = now or datetime.now(timezone.utc)
         action = reviewed_signal["action"]
         approved_size = reviewed_signal["size_scale"]
         symbol = reviewed_signal.get("symbol", "BTC/KRW")
         requested_price = execution_price
         slippage_multiplier = 1 + (self.slippage_pct / 100) if action == "buy" else 1 - (self.slippage_pct / 100)
         executed_price = round(requested_price * slippage_multiplier, 4)
-        notional_value = round(approved_size * executed_price, 4)
+        effective_size = approved_size
+        if action == "sell":
+            existing_position = self.positions.get(symbol) or {}
+            effective_size = min(approved_size, max(existing_position.get("quantity", 0.0), 0.0))
+        notional_value = round(effective_size * executed_price, 4)
         fee_paid = round(notional_value * (self.trading_fee_pct / 100), 4)
         total_buy_cost = round(notional_value + fee_paid, 4)
 
@@ -149,7 +172,8 @@ class PaperBroker:
                 "action": action,
                 "symbol": symbol,
             }
-        if action == "buy" and self.consecutive_buys >= self.max_consecutive_buys:
+        symbol_consecutive_buys = int(self.consecutive_buys_by_symbol.get(symbol, 0) or 0)
+        if action == "buy" and symbol_consecutive_buys >= self.max_consecutive_buys:
             return {
                 "status": "rejected",
                 "reason": "max_consecutive_buys_reached",
@@ -157,7 +181,7 @@ class PaperBroker:
                 "policy": PolicyObservation(
                     policy_name="max_consecutive_buys",
                     policy_value=self.max_consecutive_buys,
-                    current_state=self.consecutive_buys,
+                    current_state=symbol_consecutive_buys,
                     block_reason="max_consecutive_buys_reached",
                 ).as_dict(),
             }
@@ -172,7 +196,7 @@ class PaperBroker:
             }
         if action == "buy":
             current_position_value = self.positions.get(symbol, {}).get("quantity", 0.0) * requested_price
-            max_symbol_exposure_value = self.starting_cash * (self.max_symbol_exposure_pct / 100)
+            max_symbol_exposure_value = self._current_total_equity(symbol, requested_price) * (self.max_symbol_exposure_pct / 100)
             if current_position_value + notional_value > max_symbol_exposure_value:
                 return {
                     "status": "rejected",
@@ -192,7 +216,7 @@ class PaperBroker:
             action=action,
             confidence=reviewed_signal["confidence"],
             requested_size=reviewed_signal["confidence"],
-            approved_size=approved_size,
+            approved_size=effective_size,
             requested_price=requested_price,
             execution_price=executed_price,
             slippage_pct=self.slippage_pct,
@@ -224,7 +248,7 @@ class PaperBroker:
             new_quantity = position["quantity"] + approved_size
             position["quantity"] = self._round_qty(new_quantity)
             position["average_price"] = round(total_cost / new_quantity, 4) if new_quantity else 0.0
-            position["opened_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            position["opened_at"] = now.isoformat().replace("+00:00", "Z")
             settings = get_settings()
             if settings.atr_stop_enabled:
                 stop_distance = executed_price * 0.01 * settings.stop_atr_multiplier
@@ -236,7 +260,8 @@ class PaperBroker:
             position["trailing_stop_price"] = None
             self.cash_balance = round(self.cash_balance - total_buy_cost, 4)
             self._cleanup_dust_position(symbol, executed_price)
-            self.consecutive_buys += 1
+            self.consecutive_buys_by_symbol[symbol] = symbol_consecutive_buys + 1
+            self.consecutive_buys = max(self.consecutive_buys_by_symbol.values(), default=0)
             if self.ledger_store:
                 self.ledger_store.append_trade_log_entry(
                     TradeLogSchema(
@@ -244,7 +269,7 @@ class PaperBroker:
                         strategy_version=reviewed_signal.get("strategy_version"),
                         symbol=symbol,
                         side="buy",
-                        entry_time=datetime.now(timezone.utc),
+                        entry_time=now,
                         entry_price=executed_price,
                         quantity=approved_size,
                         entry_reason=reviewed_signal["reason"],
@@ -266,7 +291,7 @@ class PaperBroker:
                     "symbol": symbol,
                 }
             
-            sell_quantity = min(approved_size, position["quantity"])
+            sell_quantity = min(effective_size, position["quantity"])
             if sell_quantity <= 0:
                 return {
                     "status": "rejected",
@@ -285,16 +310,19 @@ class PaperBroker:
             if position["quantity"] <= 0:
                 position["average_price"] = 0.0
             position["realized_pnl"] = round(position["realized_pnl"] + realized_pnl, 4)
+            if reviewed_signal.get("force_exit") and "partial_take_profit" in str(reviewed_signal.get("reason", "")):
+                position["tp1_done"] = True
             self.total_realized_pnl = round(self.total_realized_pnl + realized_pnl, 4)
             self.cash_balance = round(self.cash_balance + (sell_quantity * executed_price) - fee_paid, 4)
-            self.consecutive_buys = 0
+            self.consecutive_buys_by_symbol[symbol] = 0
+            self.consecutive_buys = max(self.consecutive_buys_by_symbol.values(), default=0)
             self.losing_streak = self.losing_streak + 1 if realized_pnl < 0 else 0
             if self.ledger_store:
                 self.ledger_store.update_latest_open_trade_log(
                     symbol=symbol,
                     side="buy",
                     updates={
-                        "exit_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "exit_time": now.isoformat().replace("+00:00", "Z"),
                         "exit_price": executed_price,
                         "gross_pnl": round((executed_price - average_price_before_sell) * sell_quantity, 4),
                         "net_pnl": round(realized_pnl, 4),
@@ -320,7 +348,17 @@ class PaperBroker:
         settings = get_settings()
         if settings.partial_take_profit_enabled and not position.get("tp1_done") and position.get("tp1_price") and market_price >= position["tp1_price"]:
             sell_qty = round(position["quantity"] * settings.tp1_size_pct, 8)
-            position["tp1_done"] = True
+            if sell_qty * market_price < self.min_order_notional <= position["quantity"] * market_price:
+                min_executable_qty = self.min_order_notional / (market_price * (1 - (self.slippage_pct / 100)))
+                sell_qty = min(position["quantity"], math.ceil(min_executable_qty * 100_000_000) / 100_000_000)
+            remaining_qty = max(position["quantity"] - sell_qty, 0.0)
+            if 0 < remaining_qty * market_price < self.min_order_notional:
+                sell_qty = position["quantity"]
+            if settings.trailing_stop_enabled:
+                position["trailing_active"] = True
+                trailing_stop = round(market_price * (1 - settings.trailing_distance_ratio), 4)
+                current = position.get("trailing_stop_price")
+                position["trailing_stop_price"] = trailing_stop if current is None else max(current, trailing_stop)
             return {"status": "triggered", "action": "sell", "reason": "partial_take_profit", "size_scale": sell_qty}
 
         gain_ratio = (market_price - average_price) / average_price
@@ -355,6 +393,7 @@ class PaperBroker:
         self.last_prices = {}
         self.total_realized_pnl = 0.0
         self.consecutive_buys = 0
+        self.consecutive_buys_by_symbol = {}
         self.losing_streak = 0
         self._persist_state()
         return self.portfolio_snapshot()
@@ -367,6 +406,7 @@ class PaperBroker:
             "last_prices": self.last_prices,
             "total_realized_pnl": self.total_realized_pnl,
             "consecutive_buys": self.consecutive_buys,
+            "consecutive_buys_by_symbol": self.consecutive_buys_by_symbol,
             "losing_streak": self.losing_streak,
             "orders": [order.model_dump() for order in self.orders],
             "portfolio": self.portfolio_snapshot(),

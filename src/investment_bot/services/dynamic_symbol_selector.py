@@ -7,6 +7,18 @@ from investment_bot.services.market_data_service import MarketDataService
 @dataclass
 class DynamicSymbolSelector:
     market_data_service: MarketDataService
+    min_confirming_volume_surge: float = 1.31
+    min_breakout_close_location: float = 0.88
+    strong_breakout_close_location: float = 0.84
+    strong_breakout_volume_surge: float = 1.60
+    strong_breakout_momentum_pct: float = 0.0012
+    min_breakout_entry_momentum_pct: float = 0.00035
+    min_breakout_trend_gap_pct: float = 0.0012
+    max_breakout_momentum_pct: float = 0.028
+    max_recent_breakout_runup_pct: float = 0.033
+    min_range_rebound_volume_surge: float = 1.00
+    min_range_rebound_discount_pct: float = 0.016
+    max_range_rebound_discount_pct: float = 0.06
 
     def select(self, symbols: list[str], timeframe: str, top_n: int = 10) -> list[str]:
         scored = []
@@ -18,9 +30,126 @@ class DynamicSymbolSelector:
             if len(candles) < 25:
                 continue
             score = self._score(candles)
-            scored.append((score, symbol))
+            breakout_candidate = (
+                score > 0
+                and self._has_positive_short_momentum(candles)
+                and self._has_breakout_entry_momentum(candles)
+                and self._has_confirming_volume(candles)
+                and self._has_breakout_trend_gap(candles)
+                and self._has_breakout_close_location(candles)
+                and self._has_entry_green_body(candles)
+                and self._has_controlled_breakout_momentum(candles)
+                and self._has_controlled_recent_runup(candles)
+            )
+            range_rebound_score = self._range_rebound_score(candles)
+            if breakout_candidate or range_rebound_score > 0:
+                scored.append((max(score, range_rebound_score), symbol))
         scored.sort(reverse=True)
-        return [symbol for _, symbol in scored[:top_n]] or symbols
+        return [symbol for _, symbol in scored[:top_n]]
+
+    def _range_rebound_score(self, candles: list[Candle]) -> float:
+        if len(candles) < 8:
+            return 0.0
+        latest = candles[-1]
+        prev = candles[-2]
+        avg = sum(c.close for c in candles[-8:]) / 8
+        if not avg or not prev.close:
+            return 0.0
+        if latest.close < latest.open:
+            return 0.0
+        discount_pct = (avg - latest.close) / avg
+        momentum_pct = (latest.close - prev.close) / prev.close
+        if discount_pct < self.min_range_rebound_discount_pct:
+            return 0.0
+        if discount_pct > self.max_range_rebound_discount_pct:
+            return 0.0
+        if momentum_pct <= 0:
+            return 0.0
+        if self._volume_surge(candles) < self.min_range_rebound_volume_surge:
+            return 0.0
+        traded_value = sum(c.close * c.volume for c in candles[-10:]) / max(min(len(candles), 10), 1)
+        liquidity_score = min(traded_value * 0.000001, 20.0)
+        return round(liquidity_score + discount_pct * 100 + momentum_pct * 50 + self._volume_surge(candles), 6)
+
+    def _has_controlled_recent_runup(self, candles: list[Candle]) -> bool:
+        if len(candles) < 5:
+            return False
+        base = candles[-5].close
+        latest = candles[-1].close
+        runup_pct = ((latest - base) / base) if base else 0.0
+        return runup_pct <= self.max_recent_breakout_runup_pct
+
+    def _has_controlled_breakout_momentum(self, candles: list[Candle]) -> bool:
+        if len(candles) < 2:
+            return False
+        prev = candles[-2].close
+        latest = candles[-1].close
+        momentum_pct = ((latest - prev) / prev) if prev else 0.0
+        return momentum_pct <= self.max_breakout_momentum_pct
+
+    def _has_breakout_entry_momentum(self, candles: list[Candle]) -> bool:
+        return self._short_momentum_pct(candles) >= self.min_breakout_entry_momentum_pct
+
+    def _has_breakout_close_location(self, candles: list[Candle]) -> bool:
+        latest = candles[-1]
+        candle_range = latest.high - latest.low
+        if candle_range <= 0:
+            return True
+        close_location = (latest.close - latest.low) / candle_range
+        if close_location >= self.min_breakout_close_location:
+            return True
+        return (
+            close_location >= self.strong_breakout_close_location
+            and self._volume_surge(candles) >= self.strong_breakout_volume_surge
+            and self._short_momentum_pct(candles) >= self.strong_breakout_momentum_pct
+        )
+
+    def _has_confirming_volume(self, candles: list[Candle]) -> bool:
+        return self._volume_surge(candles) >= self.min_confirming_volume_surge
+
+    def _has_breakout_trend_gap(self, candles: list[Candle]) -> bool:
+        if len(candles) < 8:
+            return False
+        closes = [c.close for c in candles]
+        long_ma = sum(closes[-8:]) / 8
+        short_ma = sum(closes[-3:]) / 3
+        trend_gap_pct = ((short_ma - long_ma) / long_ma) if long_ma else 0.0
+        return trend_gap_pct >= self.min_breakout_trend_gap_pct
+
+    def _has_entry_green_body(self, candles: list[Candle]) -> bool:
+        latest = candles[-1]
+        return latest.close >= latest.open
+
+    def _volume_surge(self, candles: list[Candle]) -> float:
+        if len(candles) < 8:
+            return 0.0
+        volume_series = [c.volume for c in candles[-8:]]
+        avg_vol = sum(volume_series[:-1]) / max(len(volume_series[:-1]), 1)
+        return (volume_series[-1] / avg_vol) if avg_vol > 0 else 0.0
+
+    def _short_momentum_pct(self, candles: list[Candle]) -> float:
+        if len(candles) < 2:
+            return 0.0
+        prev = candles[-2].close
+        latest = candles[-1].close
+        return ((latest - prev) / prev) if prev else 0.0
+
+    def _has_positive_short_momentum(self, candles: list[Candle]) -> bool:
+        if len(candles) < 4:
+            return False
+        recent_base = candles[-4].close
+        prev_base = candles[-3].close
+        prev = candles[-2].close
+        latest = candles[-1].close
+        recent_high_close = max(c.close for c in candles[-8:-1])
+        return (
+            prev_base > 0
+            and prev > prev_base
+            and latest > prev
+            and recent_base > 0
+            and latest > recent_base
+            and latest > recent_high_close
+        )
 
     def _score(self, candles: list[Candle]) -> float:
         closes = [c.close for c in candles]
@@ -30,9 +159,14 @@ class DynamicSymbolSelector:
         trend = ((latest - closes[0]) / closes[0]) if closes[0] else 0.0
         volatility = ((max(closes[-10:]) - min(closes[-10:])) / latest) if latest else 0.0
         value_series = [c.close * c.volume for c in candles[-10:]]
-        volume_series = volumes[-10:]
+        volume_series = volumes[-8:]
         traded_value = sum(value_series) / max(len(value_series), 1)
         avg_vol = sum(volume_series[:-1]) / max(len(volume_series[:-1]), 1)
         volume_surge = (volume_series[-1] / avg_vol) if avg_vol else 1.0
         short_momentum = ((latest - prev) / prev) if prev else 0.0
-        return round(traded_value * 0.000001 + volatility * 100 + trend * 100 + volume_surge * 10 + short_momentum * 50, 6)
+        downside_penalty = max(-trend, 0.0) * 300 + max(-short_momentum, 0.0) * 150
+        upside_reward = max(trend, 0.0) * 100 + max(short_momentum, 0.0) * 50
+        directional_volume_surge = volume_surge if short_momentum > 0 else 0.0
+        liquidity_score = min(traded_value * 0.000001, 20.0)
+        volatility_score = min(volatility * 100, 2.5)
+        return round(liquidity_score + volatility_score + directional_volume_surge * 10 + upside_reward - downside_penalty, 6)

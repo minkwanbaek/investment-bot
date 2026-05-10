@@ -39,18 +39,24 @@ class UpbitClient:
                 continue
         return payload
 
-    def create_limit_order(self, market: str, side: str, volume: str, price: str, ord_type: str = "limit") -> dict:
+    def create_order(self, market: str, side: str, ord_type: str, volume: str | None = None, price: str | None = None) -> dict:
+        params = {
+            "market": market,
+            "side": side,
+            "ord_type": ord_type,
+        }
+        if volume is not None:
+            params["volume"] = volume
+        if price is not None:
+            params["price"] = price
         return self._request(
             "POST",
             "/v1/orders",
-            params={
-                "market": market,
-                "side": side,
-                "volume": volume,
-                "price": price,
-                "ord_type": ord_type,
-            },
+            params=params,
         )
+
+    def create_limit_order(self, market: str, side: str, volume: str, price: str, ord_type: str = "limit") -> dict:
+        return self.create_order(market=market, side=side, volume=volume, price=price, ord_type=ord_type)
 
     def get_order(self, uuid_value: str) -> dict:
         return self._request("GET", "/v1/order", params={"uuid": uuid_value})
