@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from investment_bot.core.settings import get_settings
+from investment_bot.models.account_summary import UpbitAccountSummary
 from investment_bot.models.market import Candle
 from investment_bot.services.container import get_account_service, get_alert_service, get_auto_trade_service, get_backtest_service, get_config_service, get_exchange_rules_service, get_live_execution_service, get_live_trade_sync_service, get_market_data_service, get_paper_broker, get_run_history_service, get_scheduler_service, get_semi_live_service, get_shadow_service, get_trading_cycle_service, get_upbit_client, get_visualization_service, get_drift_report_service
 from investment_bot.services.dashboard_service import DashboardService
@@ -323,8 +324,8 @@ def upbit_balances() -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/exchange/upbit/account-summary")
-def upbit_account_summary() -> dict:
+@router.get("/exchange/upbit/account-summary", response_model=UpbitAccountSummary)
+def upbit_account_summary() -> UpbitAccountSummary:
     try:
         payload = get_account_service().summarize_upbit_balances()
         get_run_history_service().record(kind="upbit_account_summary", payload={"exchange": "upbit", "asset_count": payload["asset_count"]})

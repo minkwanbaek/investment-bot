@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from investment_bot.core.settings import get_settings
+from investment_bot.features.exit.application.evaluator import ExitEvaluator
+from investment_bot.features.exit.domain.models import MarketSnapshot, PositionSnapshot as ExitPositionSnapshot
 from investment_bot.core.trading_policy import PolicyObservation
 
 from investment_bot.models.order import PaperOrder
@@ -341,46 +343,58 @@ class PaperBroker:
         if not position or position.get("quantity", 0.0) <= 0:
             return {"status": "no_position"}
 
-        average_price = float(position.get("average_price", 0.0) or 0.0)
-        if average_price <= 0:
-            return {"status": "invalid_position"}
+        opened_at = position.get("opened_at")
+        if isinstance(opened_at, str):
+            opened_at = datetime.fromisoformat(opened_at.replace("Z", "+00:00"))
 
-        settings = get_settings()
-        if settings.partial_take_profit_enabled and not position.get("tp1_done") and position.get("tp1_price") and market_price >= position["tp1_price"]:
-            sell_qty = round(position["quantity"] * settings.tp1_size_pct, 8)
-            if sell_qty * market_price < self.min_order_notional <= position["quantity"] * market_price:
-                min_executable_qty = self.min_order_notional / (market_price * (1 - (self.slippage_pct / 100)))
-                sell_qty = min(position["quantity"], math.ceil(min_executable_qty * 100_000_000) / 100_000_000)
-            remaining_qty = max(position["quantity"] - sell_qty, 0.0)
-            if 0 < remaining_qty * market_price < self.min_order_notional:
-                sell_qty = position["quantity"]
-            if settings.trailing_stop_enabled:
-                position["trailing_active"] = True
-                trailing_stop = round(market_price * (1 - settings.trailing_distance_ratio), 4)
-                current = position.get("trailing_stop_price")
-                position["trailing_stop_price"] = trailing_stop if current is None else max(current, trailing_stop)
-            return {"status": "triggered", "action": "sell", "reason": "partial_take_profit", "size_scale": sell_qty}
+        evaluator = ExitEvaluator.from_runtime(
+            min_order_notional=self.min_order_notional,
+            slippage_pct=self.slippage_pct,
+        )
+        decision = evaluator.evaluate_position_exit(
+            ExitPositionSnapshot(
+                symbol=symbol,
+                quantity=float(position.get("quantity", 0.0) or 0.0),
+                average_price=float(position.get("average_price", 0.0) or 0.0),
+                opened_at=opened_at,
+                trailing_active=bool(position.get("trailing_active", False)),
+                trailing_stop_price=position.get("trailing_stop_price"),
+                tp1_done=bool(position.get("tp1_done", False)),
+                tp1_price=position.get("tp1_price"),
+                stop_price=position.get("stop_price"),
+            ),
+            MarketSnapshot(latest_price=market_price, now=now),
+        )
+        for key, value in decision.metadata.get("position_updates", {}).items():
+            position[key] = value
+        return self._serialize_exit_decision(decision)
 
-        gain_ratio = (market_price - average_price) / average_price
-        if settings.trailing_stop_enabled and gain_ratio >= settings.trailing_activation_ratio:
-            position["trailing_active"] = True
-            trailing_stop = round(market_price * (1 - settings.trailing_distance_ratio), 4)
-            current = position.get("trailing_stop_price")
-            position["trailing_stop_price"] = trailing_stop if current is None else max(current, trailing_stop)
+    def _serialize_exit_decision(self, decision) -> dict:
+        if not decision.triggered:
+            return {"status": "hold"}
+        exit_reason = decision.exit_reason or decision.reason
+        return {
+            "status": "triggered",
+            "action": "sell",
+            "reason": exit_reason,
+            "exit_reason": exit_reason,
+            "exit_source": "broker",
+            "exit_priority": self._exit_priority_value(decision.priority),
+            "exit_priority_label": decision.priority,
+            "size_scale": decision.quantity,
+            "exit_size_scale": decision.quantity,
+            "confidence": decision.confidence,
+        }
 
-        if position.get("trailing_active") and position.get("trailing_stop_price") and market_price <= position["trailing_stop_price"]:
-            return {"status": "triggered", "action": "sell", "reason": "trailing_stop", "size_scale": position["quantity"]}
-
-        if position.get("stop_price") and market_price <= position["stop_price"]:
-            return {"status": "triggered", "action": "sell", "reason": "atr_stop", "size_scale": position["quantity"]}
-
-        if settings.timeout_exit_enabled and position.get("opened_at"):
-            opened_at = datetime.fromisoformat(str(position["opened_at"]).replace("Z", "+00:00"))
-            holding_minutes = (now - opened_at).total_seconds() / 60
-            if holding_minutes >= settings.max_holding_minutes and gain_ratio < settings.min_progress_pct:
-                return {"status": "triggered", "action": "sell", "reason": "timeout", "size_scale": position["quantity"]}
-
-        return {"status": "hold"}
+    def _exit_priority_value(self, priority: str) -> int:
+        priorities = {
+            "hard_stop": 240,
+            "protective": 230,
+            "profit_take": 220,
+            "soft_exit": 210,
+            "none": 0,
+        }
+        return priorities.get(priority, 0)
 
     def mark_price(self, symbol: str, market_price: float) -> None:
         self.last_prices[symbol] = market_price

@@ -8,6 +8,7 @@ import time
 from investment_bot.core.settings import Settings
 
 logger = logging.getLogger(__name__)
+from investment_bot.features.exit.application.evaluator import ExitEvaluator
 from investment_bot.services.account_service import AccountService
 from investment_bot.services.auto_trade_scheduler import AutoTradeScheduler
 from investment_bot.services.dynamic_symbol_selector import DynamicSymbolSelector
@@ -44,6 +45,7 @@ class AutoTradeService:
             "dynamic_symbol_selection": self.settings.dynamic_symbol_selection,
             "dynamic_symbol_top_n": self.settings.dynamic_symbol_top_n,
             "last_selected_symbols": self._last_selected_symbols,
+            "last_selector_debug_info": getattr(self.dynamic_symbol_selector, "last_debug_info", None),
             "enabled_strategies": list_enabled_strategies(),
             "strategy_name": self.settings.auto_trade_strategy_name,
             "timeframe": self.settings.auto_trade_timeframe,
@@ -92,7 +94,7 @@ class AutoTradeService:
         import time
 
         t0 = time.time()
-        account = self.account_service.summarize_upbit_balances()
+        account = self.account_service.summarize_upbit_balances_internal()
         krw_cash = float(account.get("krw_cash", 0.0))
         self.shadow_service.invalidate_cache()
         logger.info("run_once started | krw_cash=%.2f symbols=%d", krw_cash, len(self.settings.symbols))
@@ -105,12 +107,26 @@ class AutoTradeService:
         symbols = self.settings.symbols
         dynamic_symbols_selected = False
         if self.settings.dynamic_symbol_selection and self.dynamic_symbol_selector:
-            symbols = self.dynamic_symbol_selector.select(
+            selected_symbols = self.dynamic_symbol_selector.select(
                 symbols=self.settings.symbols,
                 timeframe=self.settings.auto_trade_timeframe,
                 top_n=self.settings.dynamic_symbol_top_n,
             )
-            dynamic_symbols_selected = True
+            if selected_symbols:
+                symbols = selected_symbols
+                dynamic_symbols_selected = True
+            else:
+                fallback_symbols = (
+                    (getattr(self.dynamic_symbol_selector, "last_debug_info", None) or {}).get("ranked_fallback_symbols")
+                    or self.settings.symbols
+                )
+                symbols = list(fallback_symbols[: max(1, int(self.settings.dynamic_symbol_top_n))])
+                logger.warning(
+                    "dynamic selector returned 0 symbols; falling back to ranked slice | fallback_count=%d total_symbols=%d debug=%s",
+                    len(symbols),
+                    len(self.settings.symbols),
+                    getattr(self.dynamic_symbol_selector, "last_debug_info", None),
+                )
             held_symbols = self._held_symbols_for_exit_scan(account=account, symbols=self.settings.symbols)
             for symbol in held_symbols:
                 if symbol not in symbols:
@@ -131,10 +147,14 @@ class AutoTradeService:
         logger.info("run_once batch selected | batch_size=%d total_symbols=%d", len(batch_symbols), len(symbols))
 
         candidates = []
+        hold_candidates = []
+        blocked_candidates = []
         t0_eval = time.time()
         for i, symbol in enumerate(batch_symbols):
             per_symbol = self._collect_symbol_candidates(symbol)
-            candidates.extend(per_symbol)
+            candidates.extend(per_symbol["chosen"])
+            hold_candidates.extend(per_symbol["holds"])
+            blocked_candidates.extend(per_symbol["blocked"])
             if (i + 1) % 5 == 0:
                 elapsed = time.time() - t0
                 logger.info("run_once progress | %d/%d batch symbols processed elapsed=%.2fs", i + 1, len(batch_symbols), elapsed)
@@ -159,7 +179,7 @@ class AutoTradeService:
             non_dust_sells = []
             for c in sell_candidates:
                 asset = c.get("asset", {})
-                estimated_value = float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
+                estimated_value = self._asset_exposure_value(asset)
                 near_managed_threshold = self.settings.auto_trade_min_managed_position_notional * 0.95
                 available_volume = float(asset.get("balance", 0.0) or 0.0)
                 full_sell_notional = float(c.get("latest_price", 0.0) or 0.0) * available_volume
@@ -208,22 +228,19 @@ class AutoTradeService:
             return self._handle_buy(chosen, krw_cash=krw_cash, account=account)
 
         top_hold_candidates = sorted(
-            [
-                {
-                    "symbol": c.get("symbol"),
-                    "strategy_name": c.get("strategy_name"),
-                    "confidence": c.get("confidence", 0.0),
-                    "score": c.get("score", 0.0),
-                    "regime": c.get("regime", {}).get("regime") if isinstance(c.get("regime"), dict) else c.get("regime"),
-                }
-                for c in candidates
-                if c.get("action") == "hold"
-            ],
+            hold_candidates,
             key=lambda c: (float(c.get("confidence", 0.0) or 0.0), float(c.get("score", 0.0) or 0.0)),
             reverse=True,
         )[:5]
         if top_hold_candidates:
             logger.info("top_hold_candidates | candidates=%s", top_hold_candidates)
+        top_blocked_candidates = sorted(
+            blocked_candidates,
+            key=lambda c: (int(c.get("priority", 0) or 0), float(c.get("confidence", 0.0) or 0.0), float(c.get("score", 0.0) or 0.0)),
+            reverse=True,
+        )[:5]
+        if top_blocked_candidates:
+            logger.info("top_blocked_candidates | candidates=%s", top_blocked_candidates)
 
         logger.info("run_once skipped: non_actionable_signal | %d candidates evaluated elapsed=%.2fs", len(candidates), time.time() - t0)
         result = {
@@ -231,13 +248,14 @@ class AutoTradeService:
             "reason": "non_actionable_signal",
             "candidates": candidates,
             "top_hold_candidates": top_hold_candidates,
+            "top_blocked_candidates": top_blocked_candidates,
             "evaluated_symbols": batch_symbols,
             "batch_size": len(batch_symbols),
             "total_symbols": len(symbols),
         }
         return self._remember(result, record_kind="auto_trade_skip")
 
-    def _collect_symbol_candidates(self, symbol: str) -> list[dict]:
+    def _collect_symbol_candidates(self, symbol: str) -> dict:
         """
         Evaluate a single symbol across all enabled strategies.
         
@@ -329,7 +347,7 @@ class AutoTradeService:
         if callable(get_cached_account_summary):
             account_summary = get_cached_account_summary()
         else:
-            account_summary = self.account_service.summarize_upbit_balances()
+            account_summary = self.account_service.summarize_upbit_balances_internal()
         asset_base = self.account_service.get_asset_balance(symbol)  # ← Fetch once per symbol
         paper_broker = getattr(getattr(semi_live_service, "trading_cycle_service", None), "paper_broker", None)
         sync_exchange_position = getattr(paper_broker, "sync_exchange_position", None)
@@ -400,6 +418,7 @@ class AutoTradeService:
                 "strategy_name": strategy_name,
                 "shadow": shadow,
                 "review": review,
+                "review_action": review_action,
                 "asset": asset,
                 "regime": regime,
                 "override": override,
@@ -414,7 +433,11 @@ class AutoTradeService:
             })
         
         chosen = self.strategy_selection_service.choose(symbol=symbol, regime=regime_name, candidates=collected)
-        result = [chosen] if chosen else []
+        result = {
+            "chosen": [chosen] if chosen else [],
+            "holds": [self._summarize_hold_candidate(c) for c in collected if c.get("action") == "hold"],
+            "blocked": [self._summarize_blocked_candidate(c) for c in collected if self._candidate_block_reason(c) is not None],
+        }
         
         # Log per-symbol performance metrics
         total_symbol_time = time.time() - t0_symbol
@@ -426,6 +449,57 @@ class AutoTradeService:
         )
         
         return result
+
+    def _summarize_hold_candidate(self, candidate: dict) -> dict:
+        review = candidate.get("review") or {}
+        meta = ((candidate.get("shadow") or {}).get("decision") or {}).get("signal", {}).get("meta", {}) or {}
+        return {
+            "symbol": candidate.get("symbol"),
+            "strategy_name": candidate.get("strategy_name"),
+            "confidence": candidate.get("confidence", 0.0),
+            "score": candidate.get("score", 0.0),
+            "regime": candidate.get("regime", {}).get("regime") if isinstance(candidate.get("regime"), dict) else candidate.get("regime"),
+            "reason": review.get("reason"),
+            "block_reason": meta.get("block_reason"),
+        }
+
+    def _candidate_block_reason(self, candidate: dict) -> str | None:
+        action = candidate.get("action")
+        review_action = candidate.get("review_action")
+        asset = candidate.get("asset") or {}
+        latest_price = float(candidate.get("latest_price", 0.0) or 0.0)
+        available_volume = float(asset.get("balance", 0.0) or 0.0)
+        review = candidate.get("review") or {}
+        if action == "sell" or review_action == "sell":
+            managed_notional = float(asset.get("managed_notional", asset.get("estimated_cost_basis", 0.0)) or 0.0)
+            if asset.get("managed") is False:
+                return "below_min_managed_position_notional"
+            if latest_price * available_volume < self.settings.min_order_notional:
+                return "sell_below_min_order_notional"
+            return None
+        if action == "buy":
+            reviewed_target = float(review.get("target_notional", 0.0) or 0.0)
+            if reviewed_target < self.settings.min_order_notional:
+                return "risk_sized_below_min_order_notional"
+        return None
+
+    def _summarize_blocked_candidate(self, candidate: dict) -> dict:
+        review = candidate.get("review") or {}
+        asset = candidate.get("asset") or {}
+        override = candidate.get("override") or {}
+        return {
+            "symbol": candidate.get("symbol"),
+            "strategy_name": candidate.get("strategy_name"),
+            "action": candidate.get("action"),
+            "confidence": candidate.get("confidence", 0.0),
+            "score": candidate.get("score", 0.0),
+            "reason": review.get("reason"),
+            "blocker": self._candidate_block_reason(candidate),
+            "managed_notional": float(asset.get("managed_notional", asset.get("estimated_cost_basis", 0.0)) or 0.0),
+            "available_volume": float(asset.get("balance", 0.0) or 0.0),
+            "latest_price": float(candidate.get("latest_price", 0.0) or 0.0),
+            "priority": int(override.get("exit_priority", 0) or 0),
+        }
 
     def _score_candidate(self, action: str, confidence: float, review: dict) -> float:
         if action == "hold":
@@ -494,9 +568,12 @@ class AutoTradeService:
         override = candidate.get("override")
         if override is None:
             return 0
+        explicit_priority = int(override.get("exit_priority", 0) or 0)
+        if explicit_priority > 0:
+            return explicit_priority
         if override.get("override_reason") == "stop_loss":
-            return 2
-        return 1
+            return 300
+        return 200
 
     def _buy_candidate_is_executable(self, chosen: dict, krw_cash: float, account: dict) -> bool:
         if krw_cash < self.settings.auto_trade_min_krw_balance:
@@ -505,7 +582,7 @@ class AutoTradeService:
         reviewed_target = float(review.get("target_notional", 0.0) or 0.0)
         if reviewed_target < self.settings.min_order_notional:
             return False
-        current_exposure = sum(float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0) for asset in account.get("assets", []))
+        current_exposure = sum(self._asset_exposure_value(asset) for asset in account.get("assets", []))
         total_equity = krw_cash + current_exposure
         allocation_cap = min(krw_cash * (self.settings.auto_trade_target_allocation_pct / 100), krw_cash)
         target_notional = min(allocation_cap, reviewed_target if reviewed_target > 0 else allocation_cap)
@@ -532,7 +609,7 @@ class AutoTradeService:
             symbol = asset.get("symbol") or configured.get(currency)
             if symbol not in symbols or symbol in held:
                 continue
-            estimated_value = float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
+            estimated_value = self._asset_exposure_value(asset)
             if estimated_value >= min_exit_scan_notional:
                 held.append(symbol)
         return held
@@ -548,7 +625,7 @@ class AutoTradeService:
                 "chosen": chosen_summary,
             }
             return self._remember(result, record_kind="auto_trade_skip")
-        current_exposure = sum(float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0) for asset in account.get("assets", []))
+        current_exposure = sum(self._asset_exposure_value(asset) for asset in account.get("assets", []))
         total_equity = krw_cash + current_exposure
         allocation_cap = min(krw_cash * (self.settings.auto_trade_target_allocation_pct / 100), krw_cash)
         review = chosen["review"]
@@ -616,8 +693,15 @@ class AutoTradeService:
             asset_symbol = asset.get("symbol")
             asset_currency = asset.get("currency")
             if asset_symbol == symbol or asset_currency == currency:
-                exposure += float(asset.get("estimated_market_value", asset.get("estimated_cost_basis", 0.0)) or 0.0)
+                exposure += self._asset_exposure_value(asset)
         return exposure
+
+    def _asset_exposure_value(self, asset: dict) -> float:
+        for key in ("market_value", "liquidation_value", "estimated_market_value", "estimated_cost_basis"):
+            value = asset.get(key)
+            if value is not None:
+                return float(value or 0.0)
+        return 0.0
 
     def _max_buy_notional_after_fee(self, krw_cash: float) -> float:
         fee_multiplier = 1 + (self.settings.trading_fee_pct / 100)
@@ -681,20 +765,35 @@ class AutoTradeService:
     def _exit_override(self, symbol: str, asset: dict, latest_price: float) -> dict | None:
         balance = float(asset.get("balance", 0.0) or 0.0)
         avg_buy_price = float(asset.get("avg_buy_price", 0.0) or 0.0)
-        if balance <= 0 or avg_buy_price <= 0 or latest_price <= 0:
+        evaluator = ExitEvaluator(
+            settings=self.settings,
+            min_order_notional=self.settings.min_order_notional,
+            slippage_pct=self.settings.slippage_pct,
+        )
+        decision = evaluator.evaluate_live_exit_override(
+            balance=balance,
+            avg_buy_price=avg_buy_price,
+            latest_price=latest_price,
+            peak_price=self._peak_price_by_symbol.get(symbol),
+        )
+        if decision.next_peak_price is None:
             self._peak_price_by_symbol.pop(symbol, None)
+        else:
+            self._peak_price_by_symbol[symbol] = decision.next_peak_price
+        if not decision.triggered:
             return None
-        peak = self._peak_price_by_symbol.get(symbol, latest_price)
-        peak = max(peak, latest_price)
-        self._peak_price_by_symbol[symbol] = peak
-        pnl_pct = ((latest_price - avg_buy_price) / avg_buy_price) * 100
-        peak_pnl_pct = ((peak - avg_buy_price) / avg_buy_price) * 100
-        drawdown_from_peak_pct = ((peak - latest_price) / peak) * 100 if peak > 0 else 0.0
-        if pnl_pct <= -self.settings.auto_trade_stop_loss_pct:
-            return {"action": "sell", "override_reason": "stop_loss", "sell_ratio": 1.0, "pnl_pct": round(pnl_pct, 4), "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4)}
-        if peak_pnl_pct >= self.settings.auto_trade_partial_take_profit_pct and pnl_pct > 0 and drawdown_from_peak_pct >= self.settings.auto_trade_trailing_stop_pct:
-            return {"action": "sell", "override_reason": "take_profit_trailing_stop", "sell_ratio": self.settings.auto_trade_partial_sell_ratio, "pnl_pct": round(pnl_pct, 4), "drawdown_from_peak_pct": round(drawdown_from_peak_pct, 4)}
-        return None
+        exit_reason = decision.reason
+        exit_priority = 300 if exit_reason == "stop_loss" else 200
+        return {
+            "action": "sell",
+            "override_reason": exit_reason,
+            "exit_reason": exit_reason,
+            "exit_source": "live_override",
+            "exit_priority": exit_priority,
+            "sell_ratio": decision.sell_ratio,
+            "pnl_pct": decision.pnl_pct,
+            "drawdown_from_peak_pct": decision.drawdown_from_peak_pct,
+        }
 
     def _submit_trade(self, symbol: str, action: str, price: float, volume: float, shadow: dict, override: dict | None = None, extra: dict | None = None) -> dict:
         preview = self.live_execution_service.preview_order(symbol=symbol, side=action, price=price, volume=volume)

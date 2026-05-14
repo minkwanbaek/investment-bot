@@ -27,7 +27,7 @@ class ShadowService:
 
     def _get_cached_account_summary(self) -> dict | None:
         if self._account_cache is None and self.account_service:
-            self._account_cache = self.account_service.summarize_upbit_balances()
+            self._account_cache = self.account_service.summarize_upbit_balances_internal()
         return self._account_cache
 
     def invalidate_cache(self) -> None:
@@ -46,11 +46,15 @@ class ShadowService:
                 "action": signal.get("action"),
                 "confidence": signal.get("confidence"),
                 "reason": signal.get("reason"),
+                "meta": signal.get("meta"),
             },
             "review": {
                 "approved": review.get("approved"),
                 "action": review.get("action"),
                 "reason": review.get("reason"),
+                "confidence": review.get("confidence"),
+                "cash_balance": review.get("cash_balance"),
+                "latest_price": review.get("latest_price"),
                 "target_notional": review.get("target_notional"),
                 "size_scale": review.get("size_scale"),
                 "market_regime": review.get("market_regime"),
@@ -106,7 +110,7 @@ class ShadowService:
             "shadow_service.run_once | symbol=%s strategy=%s cache_bal=%.3fs cache_acct=%.3fs sync_pos=%.3fs semi_live=%.3fs total=%.3fs",
             symbol, strategy_name, t1-t0, t2-t1, t3-t2, t4-t3, t4-t0,
         )
-        account_summary = self.account_service.summarize_upbit_balances() if self.account_service else None
+        account_summary = self.account_service.summarize_upbit_balances_internal() if self.account_service else None
         
         # live 모드에서 실제 주문 제출 여부 확인
         live_order_submitted = False

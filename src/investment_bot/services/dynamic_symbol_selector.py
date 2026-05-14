@@ -1,36 +1,55 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from investment_bot.models.market import Candle
 from investment_bot.services.market_data_service import MarketDataService
+from investment_bot.strategies.trend_following import TrendFollowingStrategy
 
 
 @dataclass
 class DynamicSymbolSelector:
     market_data_service: MarketDataService
-    min_confirming_volume_surge: float = 1.31
+    min_confirming_volume_surge: float | None = None
+    last_debug_info: dict | None = field(default=None, init=False)
     min_breakout_close_location: float = 0.88
     strong_breakout_close_location: float = 0.84
     strong_breakout_volume_surge: float = 1.60
     strong_breakout_momentum_pct: float = 0.0012
     min_breakout_entry_momentum_pct: float = 0.00035
-    min_breakout_trend_gap_pct: float = 0.0012
+    min_breakout_trend_gap_pct: float | None = None
     max_breakout_momentum_pct: float = 0.028
     max_recent_breakout_runup_pct: float = 0.033
     min_range_rebound_volume_surge: float = 1.00
     min_range_rebound_discount_pct: float = 0.016
     max_range_rebound_discount_pct: float = 0.06
 
+    def __post_init__(self) -> None:
+        # Keep selector breakout confirmation aligned with the default
+        # trend-following entry gates unless explicitly overridden.
+        if self.min_confirming_volume_surge is None:
+            self.min_confirming_volume_surge = TrendFollowingStrategy.min_entry_volume_ratio
+        if self.min_breakout_trend_gap_pct is None:
+            self.min_breakout_trend_gap_pct = TrendFollowingStrategy.min_trend_gap_pct
+
     def select(self, symbols: list[str], timeframe: str, top_n: int = 10) -> list[str]:
-        scored = []
+        strict_scored = []
+        soft_scored = []
+        top_rejections = []
+        short_history_symbols = []
+        fetch_errors = []
+
         for symbol in symbols:
             try:
                 candles = self.market_data_service.get_recent_candles('live', symbol, timeframe, 30)
             except Exception:
+                fetch_errors.append(symbol)
                 continue
             if len(candles) < 25:
+                short_history_symbols.append(symbol)
                 continue
+
             score = self._score(candles)
-            breakout_candidate = (
+            range_rebound_score = self._range_rebound_score(candles)
+            strict_breakout_candidate = (
                 score > 0
                 and self._has_positive_short_momentum(candles)
                 and self._has_breakout_entry_momentum(candles)
@@ -41,11 +60,74 @@ class DynamicSymbolSelector:
                 and self._has_controlled_breakout_momentum(candles)
                 and self._has_controlled_recent_runup(candles)
             )
-            range_rebound_score = self._range_rebound_score(candles)
-            if breakout_candidate or range_rebound_score > 0:
-                scored.append((max(score, range_rebound_score), symbol))
-        scored.sort(reverse=True)
-        return [symbol for _, symbol in scored[:top_n]]
+            soft_breakout_candidate = (
+                score > 0
+                and self._has_positive_short_momentum(candles)
+                and self._has_breakout_entry_momentum(candles)
+                and self._has_confirming_volume(candles)
+                and self._has_entry_green_body(candles)
+                and self._has_controlled_breakout_momentum(candles)
+                and self._has_controlled_recent_runup(candles)
+            )
+
+            if strict_breakout_candidate:
+                strict_scored.append((score, symbol, "strict_breakout"))
+                continue
+            if range_rebound_score > 0:
+                strict_scored.append((range_rebound_score, symbol, "range_rebound"))
+                continue
+            if soft_breakout_candidate:
+                soft_scored.append((score, symbol, "soft_breakout"))
+                continue
+
+            rejection_reasons = []
+            if score <= 0:
+                rejection_reasons.append("score")
+            if score > 0 and not self._has_positive_short_momentum(candles):
+                rejection_reasons.append("momentum")
+            if score > 0 and not self._has_breakout_entry_momentum(candles):
+                rejection_reasons.append("entry_momentum")
+            if score > 0 and not self._has_confirming_volume(candles):
+                rejection_reasons.append("volume")
+            if score > 0 and not self._has_breakout_trend_gap(candles):
+                rejection_reasons.append("trend_gap")
+            if score > 0 and not self._has_breakout_close_location(candles):
+                rejection_reasons.append("close_location")
+            if score > 0 and not self._has_controlled_breakout_momentum(candles):
+                rejection_reasons.append("overextended_candle")
+            if score > 0 and not self._has_controlled_recent_runup(candles):
+                rejection_reasons.append("recent_runup")
+            top_rejections.append((score, symbol, rejection_reasons or ["filtered"]))
+
+        strict_scored.sort(reverse=True)
+        soft_scored.sort(reverse=True)
+        combined = strict_scored + [entry for entry in soft_scored if entry[1] not in {symbol for _, symbol, _ in strict_scored}]
+        selected_symbols = [symbol for _, symbol, _ in combined[:top_n]]
+        ranked_fallback_symbols = [
+            symbol
+            for score, symbol, _reasons in sorted(top_rejections, reverse=True)
+            if score > 0 and symbol not in selected_symbols
+        ][:top_n]
+        self.last_debug_info = {
+            "selected_symbols": selected_symbols,
+            "selected_count": len(selected_symbols),
+            "strict_candidate_count": len(strict_scored),
+            "soft_candidate_count": len(soft_scored),
+            "used_soft_fill": len(selected_symbols) > len(strict_scored),
+            "used_soft_fallback": len(selected_symbols) > len(strict_scored),
+            "ranked_fallback_symbols": ranked_fallback_symbols,
+            "top_candidates": [
+                {"symbol": symbol, "score": round(score, 6), "type": candidate_type}
+                for score, symbol, candidate_type in combined[: min(top_n, 10)]
+            ],
+            "top_rejections": [
+                {"symbol": symbol, "score": round(score, 6), "reasons": reasons}
+                for score, symbol, reasons in sorted(top_rejections, reverse=True)[:5]
+            ],
+            "short_history_symbols": short_history_symbols,
+            "fetch_error_symbols": fetch_errors,
+        }
+        return selected_symbols
 
     def _range_rebound_score(self, candles: list[Candle]) -> float:
         if len(candles) < 8:
@@ -144,7 +226,7 @@ class DynamicSymbolSelector:
         recent_high_close = max(c.close for c in candles[-8:-1])
         return (
             prev_base > 0
-            and prev > prev_base
+            and prev >= prev_base
             and latest > prev
             and recent_base > 0
             and latest > recent_base

@@ -19,13 +19,22 @@ class DCAStrategy(BaseStrategy):
         position_qty = float(position.get("quantity", 0.0) or 0.0)
         average_price = float(position.get("average_price", 0.0) or 0.0)
         rebound_pct = ((latest - average_price) / average_price) if average_price else 0.0
-        if position_qty > 0 and rebound_pct >= self.sell_rebound_threshold:
-            return TradeSignal(strategy_name=self.name, symbol=symbol, action="sell", confidence=0.60, reason=f"value_dca_rebound_exit rebound_pct={rebound_pct:.4f}")
         avg = sum(closes[-8:]) / 8
         drawdown_pct = ((latest - avg) / avg) if avg else 0.0
         prev = closes[-2]
         momentum_pct = ((latest - prev) / prev) if prev else 0.0
         body_confirmed = candles[-1].close >= candles[-1].open
+        meta = {
+            "body_confirmed": body_confirmed,
+        }
+        if position_qty > 0:
+            meta = {
+                **meta,
+                "managed_rebound_exit_threshold": self.sell_rebound_threshold,
+                "managed_rebound_exit_reason": "value_dca_rebound_exit",
+                "rebound_pct": round(rebound_pct, 6),
+            }
+            return TradeSignal(strategy_name=self.name, symbol=symbol, action="hold", confidence=0.0, reason="position_open_no_exit", meta=meta)
         if self.max_buy_drawdown_pct <= drawdown_pct <= self.buy_drawdown_threshold and momentum_pct >= 0 and body_confirmed:
-            return TradeSignal(strategy_name=self.name, symbol=symbol, action="buy", confidence=0.50, reason=f"value_dca drawdown_pct={drawdown_pct:.4f}, momentum_pct={momentum_pct:.4f}, body_confirmed={body_confirmed}")
-        return TradeSignal(strategy_name=self.name, symbol=symbol, action="hold", confidence=0.0, reason=f"no_dca_window drawdown_pct={drawdown_pct:.4f}, momentum_pct={momentum_pct:.4f}, body_confirmed={body_confirmed}")
+            return TradeSignal(strategy_name=self.name, symbol=symbol, action="buy", confidence=0.50, reason=f"value_dca drawdown_pct={drawdown_pct:.4f}, momentum_pct={momentum_pct:.4f}, body_confirmed={body_confirmed}", meta=meta)
+        return TradeSignal(strategy_name=self.name, symbol=symbol, action="hold", confidence=0.0, reason=f"no_dca_window drawdown_pct={drawdown_pct:.4f}, momentum_pct={momentum_pct:.4f}, body_confirmed={body_confirmed}", meta=meta)

@@ -46,7 +46,7 @@ def test_trend_following_holds_low_volume_breakout():
     assert signal.meta["entry_volume_ratio"] == 0.4
 
 
-def test_trend_following_holds_average_plus_volume_breakout():
+def test_trend_following_holds_on_average_plus_volume_breakout_below_default_volume_gate():
     candles = [
         Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=close, volume=volume, timestamp=str(i))
         for i, (close, volume) in enumerate(
@@ -182,7 +182,7 @@ def test_trend_following_sells_on_clear_downtrend_with_negative_momentum():
     assert signal.action == "sell"
 
 
-def test_trend_following_exits_open_position_at_dev_stop_loss_threshold():
+def test_trend_following_emits_exit_hints_for_open_position():
     candles = [
         Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
         for i, close in enumerate([100, 100.2, 100.4, 100.6, 100.8, 100.6, 100.2, 98.4])
@@ -198,9 +198,11 @@ def test_trend_following_exits_open_position_at_dev_stop_loss_threshold():
 
     signal = TrendFollowingStrategy().generate_signal(candles, broker=Broker())
 
-    assert signal.action == "sell"
-    assert signal.meta["force_exit"] is True
-    assert signal.meta["exit_reason"] == "stop_loss"
+    assert signal.action == "hold"
+    assert signal.reason == "position_open_no_exit"
+    assert signal.meta["strategy_stop_loss_pct"] == TrendFollowingStrategy.stop_loss_pct
+    assert signal.meta["strategy_take_profit_pct"] == TrendFollowingStrategy.take_profit_pct
+    assert signal.meta["trend_reversal_hint"] is True
 
 
 def test_mean_reversion_buys_on_deep_discount_with_stabilizing_momentum():
@@ -234,7 +236,7 @@ def test_mean_reversion_holds_without_clear_reversal_setup():
     assert signal.action == "hold"
 
 
-def test_mean_reversion_sells_rebound_against_managed_position():
+def test_mean_reversion_emits_exit_hints_for_managed_position():
     candles = [
         Candle(symbol="ETH/KRW", timeframe="1h", open=1, high=1, low=1, close=c, volume=1, timestamp=str(i))
         for i, c in enumerate([98, 99, 99, 100, 100, 100, 100, 101.3])
@@ -249,8 +251,10 @@ def test_mean_reversion_sells_rebound_against_managed_position():
         }
 
     signal = MeanReversionStrategy().generate_signal(candles, broker=Broker())
-    assert signal.action == "sell"
-    assert "mean_reversion_managed_rebound_exit" in signal.reason
+    assert signal.action == "hold"
+    assert signal.reason == "position_open_no_exit"
+    assert signal.meta["managed_rebound_exit_reason"] == "mean_reversion_managed_rebound_exit"
+    assert signal.meta["managed_rebound_exit_threshold"] == MeanReversionStrategy.managed_rebound_exit_threshold
 
 
 def test_dca_only_buys_on_meaningful_pullback():
@@ -292,7 +296,7 @@ def test_dca_holds_without_pullback():
     assert signal.action == "hold"
 
 
-def test_dca_sells_rebound_against_managed_position():
+def test_dca_emits_exit_hints_for_managed_position():
     candles = [
         Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=c, volume=1, timestamp=str(i))
         for i, c in enumerate([98, 99, 99, 100, 100, 100, 100, 101.3])
@@ -307,5 +311,7 @@ def test_dca_sells_rebound_against_managed_position():
         }
 
     signal = DCAStrategy().generate_signal(candles, broker=Broker())
-    assert signal.action == "sell"
-    assert "value_dca_rebound_exit" in signal.reason
+    assert signal.action == "hold"
+    assert signal.reason == "position_open_no_exit"
+    assert signal.meta["managed_rebound_exit_reason"] == "value_dca_rebound_exit"
+    assert signal.meta["managed_rebound_exit_threshold"] == DCAStrategy.sell_rebound_threshold

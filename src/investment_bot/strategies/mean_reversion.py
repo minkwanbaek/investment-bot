@@ -24,18 +24,6 @@ class MeanReversionStrategy(BaseStrategy):
         position_qty = float(position.get("quantity", 0.0) or 0.0)
         average_price = float(position.get("average_price", 0.0) or 0.0)
         rebound_pct = ((latest - average_price) / average_price) if average_price else 0.0
-        if position_qty > 0 and rebound_pct >= self.managed_rebound_exit_threshold:
-            return TradeSignal(
-                strategy_name=self.name,
-                symbol=symbol,
-                action="sell",
-                confidence=0.60,
-                reason=f"mean_reversion_managed_rebound_exit rebound_pct={rebound_pct:.4f}",
-                meta={
-                    "managed_rebound_exit_threshold": self.managed_rebound_exit_threshold,
-                    "rebound_pct": round(rebound_pct, 6),
-                },
-            )
         deviation = (latest - avg) / avg if avg else 0.0
         momentum_pct = ((latest - prev) / prev) if prev else 0.0
         prev_avg_volume = mean(volumes[-8:-1])
@@ -51,15 +39,31 @@ class MeanReversionStrategy(BaseStrategy):
         confidence = min(max(abs(deviation) * 8, 0.0), 1.0)
         if action == "buy":
             confidence = max(confidence, 0.50)
+        meta = {
+            "buy_volume_ratio": round(buy_volume_ratio, 6),
+            "min_buy_volume_ratio": self.min_buy_volume_ratio,
+            "body_confirmed": body_confirmed,
+        }
+        if position_qty > 0:
+            meta = {
+                **meta,
+                "managed_rebound_exit_threshold": self.managed_rebound_exit_threshold,
+                "managed_rebound_exit_reason": "mean_reversion_managed_rebound_exit",
+                "rebound_pct": round(rebound_pct, 6),
+            }
+            return TradeSignal(
+                strategy_name=self.name,
+                symbol=symbol,
+                action="hold",
+                confidence=0.0,
+                reason="position_open_no_exit",
+                meta=meta,
+            )
         return TradeSignal(
             strategy_name=self.name,
             symbol=symbol,
             action=action,
             confidence=confidence,
             reason=f"deviation={deviation:.4f}, momentum_pct={momentum_pct:.4f}, buy_volume_ratio={buy_volume_ratio:.4f}, body_confirmed={body_confirmed}",
-            meta={
-                "buy_volume_ratio": round(buy_volume_ratio, 6),
-                "min_buy_volume_ratio": self.min_buy_volume_ratio,
-                "body_confirmed": body_confirmed,
-            },
+            meta=meta,
         )

@@ -857,6 +857,71 @@ def test_replay_backtest_low_volatility_1p15_size_expands_smooth_continuation_pr
     assert candidate["metrics"]["order_count"] == baseline["metrics"]["order_count"]
 
 
+def test_trading_cycle_applies_strategy_stop_loss_exit():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
+        for i, close in enumerate([100, 100.2, 100.4, 100.6, 100.8, 100.6, 100.2, 98.4], start=1)
+    ]
+    paper_broker = PaperBroker(starting_cash=1000, min_order_notional=0.0)
+    paper_broker.positions["BTC/KRW"] = {
+        "quantity": 1.0,
+        "average_price": 100.0,
+        "realized_pnl": 0.0,
+        "opened_at": None,
+        "stop_price": None,
+        "tp1_price": None,
+        "tp1_done": False,
+        "trailing_active": False,
+        "trailing_stop_price": None,
+    }
+    trading_cycle_service = TradingCycleService(
+        risk_controller=RiskController(max_confidence_position_scale=0.01),
+        paper_broker=paper_broker,
+    )
+
+    result = trading_cycle_service.run(strategy_name="trend_following", candles=candles)
+
+    assert result["signal"]["action"] == "sell"
+    assert result["signal"]["meta"]["force_exit"] is True
+    assert result["signal"]["meta"]["exit_reason"] == "stop_loss"
+    assert result["signal"]["meta"]["exit_source"] == "strategy"
+    assert result["signal"]["meta"]["exit_priority"] == 100
+    assert result["review"]["size_scale"] == 1.0
+
+
+def test_trading_cycle_broker_exit_takes_precedence_over_strategy_exit():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=close, high=close, low=close, close=close, volume=10, timestamp=str(i))
+        for i, close in enumerate([100, 100.2, 100.4, 100.6, 100.8, 100.6, 100.2, 98.4], start=1)
+    ]
+    paper_broker = PaperBroker(starting_cash=1000, min_order_notional=0.0)
+    paper_broker.positions["BTC/KRW"] = {
+        "quantity": 1.0,
+        "average_price": 100.0,
+        "realized_pnl": 0.0,
+        "opened_at": None,
+        "stop_price": 99.0,
+        "tp1_price": None,
+        "tp1_done": False,
+        "trailing_active": False,
+        "trailing_stop_price": None,
+    }
+    trading_cycle_service = TradingCycleService(
+        risk_controller=RiskController(max_confidence_position_scale=0.01),
+        paper_broker=paper_broker,
+    )
+
+    result = trading_cycle_service.run(strategy_name="trend_following", candles=candles)
+
+    assert result["signal"]["action"] == "sell"
+    assert result["signal"]["meta"]["force_exit"] is True
+    assert result["signal"]["meta"]["exit_reason"] == "atr_stop"
+    assert result["signal"]["meta"]["exit_source"] == "broker"
+    assert result["signal"]["meta"]["exit_priority"] == 240
+    assert result["signal"]["meta"]["exit_priority_label"] == "hard_stop"
+    assert result["review"]["size_scale"] == 1.0
+
+
 def test_trading_cycle_applies_broker_partial_take_profit_exit():
     candles = [
         Candle(symbol="BTC/KRW", timeframe="1h", open=100, high=105, low=99, close=close, volume=1, timestamp=str(i))
@@ -884,7 +949,70 @@ def test_trading_cycle_applies_broker_partial_take_profit_exit():
     assert result["signal"]["action"] == "sell"
     assert result["signal"]["meta"]["force_exit"] is True
     assert result["signal"]["meta"]["exit_reason"] == "partial_take_profit"
+    assert result["signal"]["meta"]["exit_source"] == "broker"
+    assert result["signal"]["meta"]["exit_priority"] == 220
+    assert result["signal"]["meta"]["exit_priority_label"] == "profit_take"
     assert result["review"]["size_scale"] == 0.5
+
+
+def test_trading_cycle_applies_mean_reversion_managed_rebound_exit():
+    candles = [
+        Candle(symbol="ETH/KRW", timeframe="1h", open=1, high=1, low=1, close=c, volume=1, timestamp=str(i))
+        for i, c in enumerate([98, 99, 99, 100, 100, 100, 100, 101.3], start=1)
+    ]
+    paper_broker = PaperBroker(starting_cash=1000, min_order_notional=0.0)
+    paper_broker.positions["ETH/KRW"] = {
+        "quantity": 2.0,
+        "average_price": 100.0,
+        "realized_pnl": 0.0,
+        "opened_at": None,
+        "stop_price": None,
+        "tp1_price": None,
+        "tp1_done": False,
+        "trailing_active": False,
+        "trailing_stop_price": None,
+    }
+    trading_cycle_service = TradingCycleService(
+        risk_controller=RiskController(max_confidence_position_scale=0.01),
+        paper_broker=paper_broker,
+    )
+
+    result = trading_cycle_service.run(strategy_name="mean_reversion", candles=candles)
+
+    assert result["signal"]["action"] == "sell"
+    assert result["signal"]["meta"]["force_exit"] is True
+    assert result["signal"]["meta"]["exit_reason"] == "mean_reversion_managed_rebound_exit"
+    assert result["review"]["size_scale"] == 2.0
+
+
+def test_trading_cycle_applies_dca_managed_rebound_exit():
+    candles = [
+        Candle(symbol="BTC/KRW", timeframe="1h", open=1, high=1, low=1, close=c, volume=1, timestamp=str(i))
+        for i, c in enumerate([98, 99, 99, 100, 100, 100, 100, 101.3], start=1)
+    ]
+    paper_broker = PaperBroker(starting_cash=1000, min_order_notional=0.0)
+    paper_broker.positions["BTC/KRW"] = {
+        "quantity": 2.0,
+        "average_price": 100.0,
+        "realized_pnl": 0.0,
+        "opened_at": None,
+        "stop_price": None,
+        "tp1_price": None,
+        "tp1_done": False,
+        "trailing_active": False,
+        "trailing_stop_price": None,
+    }
+    trading_cycle_service = TradingCycleService(
+        risk_controller=RiskController(max_confidence_position_scale=0.01),
+        paper_broker=paper_broker,
+    )
+
+    result = trading_cycle_service.run(strategy_name="dca", candles=candles)
+
+    assert result["signal"]["action"] == "sell"
+    assert result["signal"]["meta"]["force_exit"] is True
+    assert result["signal"]["meta"]["exit_reason"] == "value_dca_rebound_exit"
+    assert result["review"]["size_scale"] == 2.0
 
 
 def test_trading_cycle_blocks_low_volatility_sideways_breakout_exception():

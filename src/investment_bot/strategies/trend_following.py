@@ -5,10 +5,12 @@ from investment_bot.strategies.base import BaseStrategy
 
 class TrendFollowingStrategy(BaseStrategy):
     name = "trend_following"
-    min_trend_gap_pct = 0.0012  # 0.12%
+    min_trend_gap_pct = 0.0010  # 0.10%
     min_entry_momentum_pct = 0.00035  # 0.035%
-    min_entry_volume_ratio = 1.30
-    min_entry_close_location = 0.88
+    # Keep the default volume gate aligned with DynamicSymbolSelector.min_confirming_volume_surge
+    # so the selector does not reject setups that the strategy would immediately buy.
+    min_entry_volume_ratio = 1.31
+    min_entry_close_location = 0.75
     max_entry_momentum_pct = 0.028
     strong_entry_close_location = 0.84
     strong_entry_volume_ratio = 1.60
@@ -45,51 +47,14 @@ class TrendFollowingStrategy(BaseStrategy):
         buy_threshold_pct = self.min_trend_gap_pct
         trend_gap_to_threshold_pct = trend_gap_pct / buy_threshold_pct if buy_threshold_pct > 0 else 0.0
 
-        # 포지션이 있으면 청산 조건 먼저 체크
+        # 포지션 보유 중이면 전략은 entry 대신 exit 힌트만 제공하고,
+        # 실제 청산 판단/우선순위는 trading_cycle -> exit slice가 담당한다.
         position_open = False
         if broker is not None:
             position = broker.positions.get(symbol, {})
             quantity = position.get("quantity", 0.0)
             if quantity > 0:
                 position_open = True
-                average_price = position.get("average_price", 0.0)
-                current_price = latest
-                
-                if average_price > 0:
-                    pnl_pct = (current_price - average_price) / average_price
-                    
-                    # Stop Loss: -2% 이하
-                    if pnl_pct <= self.stop_loss_pct:
-                        return TradeSignal(
-                            strategy_name=self.name,
-                            symbol=symbol,
-                            action="sell",
-                            confidence=1.0,
-                            reason=f"stop_loss: pnl={pnl_pct*100:.2f}%, avg_price={average_price:,.0f}, current={current_price:,.0f}",
-                            meta={"force_exit": True, "exit_reason": "stop_loss"},
-                        )
-                    
-                    # Take Profit: +5% 이상
-                    if pnl_pct >= self.take_profit_pct:
-                        return TradeSignal(
-                            strategy_name=self.name,
-                            symbol=symbol,
-                            action="sell",
-                            confidence=1.0,
-                            reason=f"take_profit: pnl={pnl_pct*100:.2f}%, avg_price={average_price:,.0f}, current={current_price:,.0f}",
-                            meta={"force_exit": True, "exit_reason": "take_profit"},
-                        )
-                    
-                    # Trend Reversal: short_ma < long_ma
-                    if short_ma < long_ma:
-                        return TradeSignal(
-                            strategy_name=self.name,
-                            symbol=symbol,
-                            action="sell",
-                            confidence=0.8,
-                            reason=f"trend_reversal: short_ma={short_ma:.2f} < long_ma={long_ma:.2f}, pnl={pnl_pct*100:.2f}%",
-                            meta={"force_exit": True, "exit_reason": "trend_reversal"},
-                        )
 
         # 진입 신호 로직
         volume_confirmed = entry_volume_ratio >= self.min_entry_volume_ratio
@@ -115,6 +80,11 @@ class TrendFollowingStrategy(BaseStrategy):
         
         # Near-miss observability: structured meta
         meta = {
+            "short_ma": round(short_ma, 6),
+            "long_ma": round(long_ma, 6),
+            "trend_reversal_hint": short_ma < long_ma,
+            "strategy_stop_loss_pct": self.stop_loss_pct,
+            "strategy_take_profit_pct": self.take_profit_pct,
             "trend_gap_pct": round(trend_gap_pct, 6),
             "momentum_pct": round(momentum_pct, 6),
             "entry_volume_ratio": round(entry_volume_ratio, 6),

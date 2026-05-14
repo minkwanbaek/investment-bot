@@ -26,6 +26,43 @@ def test_selector_prefers_positive_momentum_over_falling_volume_spike():
     assert selector._score(rising_trend) > selector._score(falling_spike)
 
 
+def test_selector_fills_remaining_top_n_with_soft_breakout_candidates():
+    class FakeMarketDataService:
+        def __init__(self, candles_by_symbol):
+            self.candles_by_symbol = candles_by_symbol
+
+        def get_recent_candles(self, adapter_name, symbol, timeframe, limit):
+            return self.candles_by_symbol[symbol]
+
+    strict_breakout = _candles(
+        "STRICT/KRW",
+        [100.0 + i * 0.06 for i in range(24)] + [101.4, 101.7, 102.0, 102.3, 102.7, 103.2],
+        [1000.0] * 29 + [1500.0],
+    )
+    soft_breakout = _candles(
+        "SOFT/KRW",
+        [100.0 + i * 0.06 for i in range(24)] + [101.5, 101.8, 102.1, 102.4, 102.8, 103.3],
+        [1000.0] * 29 + [1500.0],
+    )
+    soft_breakout[-1].low = 102.8
+    soft_breakout[-1].high = 103.9
+    soft_breakout[-1].open = 102.95
+
+    selector = DynamicSymbolSelector(
+        market_data_service=FakeMarketDataService(
+            {
+                "STRICT/KRW": strict_breakout,
+                "SOFT/KRW": soft_breakout,
+            }
+        )
+    )
+
+    assert selector._has_breakout_close_location(strict_breakout)
+    assert not selector._has_breakout_close_location(soft_breakout)
+    assert selector.select(["STRICT/KRW", "SOFT/KRW"], timeframe="5m", top_n=1) == ["STRICT/KRW"]
+    assert selector.select(["STRICT/KRW", "SOFT/KRW"], timeframe="5m", top_n=2) == ["STRICT/KRW", "SOFT/KRW"]
+
+
 def test_selector_excludes_non_positive_score_symbols():
     class FakeMarketDataService:
         def __init__(self, candles_by_symbol):
@@ -620,6 +657,38 @@ def test_selector_volume_window_matches_trend_entry_gate_for_actionable_breakout
     assert selector.select(["STALE/KRW", "ACTION/KRW"], timeframe="5m", top_n=1) == ["ACTION/KRW"]
 
 
+def test_selector_default_volume_gate_tracks_trend_following_default(monkeypatch):
+    from investment_bot.strategies.trend_following import TrendFollowingStrategy
+
+    class FakeMarketDataService:
+        def get_recent_candles(self, adapter_name, symbol, timeframe, limit):
+            return []
+
+    monkeypatch.setattr(TrendFollowingStrategy, "min_entry_volume_ratio", 1.42)
+
+    selector = DynamicSymbolSelector(market_data_service=FakeMarketDataService())
+    overridden = DynamicSymbolSelector(market_data_service=FakeMarketDataService(), min_confirming_volume_surge=1.25)
+
+    assert selector.min_confirming_volume_surge == 1.42
+    assert overridden.min_confirming_volume_surge == 1.25
+
+
+def test_selector_default_trend_gap_tracks_trend_following_default(monkeypatch):
+    from investment_bot.strategies.trend_following import TrendFollowingStrategy
+
+    class FakeMarketDataService:
+        def get_recent_candles(self, adapter_name, symbol, timeframe, limit):
+            return []
+
+    monkeypatch.setattr(TrendFollowingStrategy, "min_trend_gap_pct", 0.0009)
+
+    selector = DynamicSymbolSelector(market_data_service=FakeMarketDataService())
+    overridden = DynamicSymbolSelector(market_data_service=FakeMarketDataService(), min_breakout_trend_gap_pct=0.0014)
+
+    assert selector.min_breakout_trend_gap_pct == 0.0009
+    assert overridden.min_breakout_trend_gap_pct == 0.0014
+
+
 def test_selector_requires_two_step_positive_momentum_for_breakout_candidate():
     class FakeMarketDataService:
         def __init__(self, candles_by_symbol):
@@ -654,6 +723,34 @@ def test_selector_requires_two_step_positive_momentum_for_breakout_candidate():
     assert spike_return_after_costs < 0
     assert steady_return_after_costs > 0
     assert selector.select(["SPIKE/KRW", "STEADY/KRW"], timeframe="5m", top_n=1) == ["STEADY/KRW"]
+
+
+def test_selector_allows_flat_then_breakout_positive_momentum_when_strategy_would_buy():
+    from investment_bot.strategies.trend_following import TrendFollowingStrategy
+
+    class FakeMarketDataService:
+        def __init__(self, candles_by_symbol):
+            self.candles_by_symbol = candles_by_symbol
+
+        def get_recent_candles(self, adapter_name, symbol, timeframe, limit):
+            return self.candles_by_symbol[symbol]
+
+    flat_then_breakout = _candles(
+        "FLATUP/KRW",
+        [100.0 + i * 0.04 for i in range(24)] + [101.2, 101.5, 101.8, 102.2, 102.2, 102.8],
+        [1000.0] * 29 + [1500.0],
+    )
+    flat_then_breakout[-1].low = 102.0
+    flat_then_breakout[-1].high = 102.85
+    flat_then_breakout[-1].open = 102.1
+    selector = DynamicSymbolSelector(
+        market_data_service=FakeMarketDataService({"FLATUP/KRW": flat_then_breakout})
+    )
+    strategy = TrendFollowingStrategy()
+
+    assert strategy.generate_signal(flat_then_breakout).action == "buy"
+    assert selector._has_positive_short_momentum(flat_then_breakout)
+    assert selector.select(["FLATUP/KRW"], timeframe="5m", top_n=1) == ["FLATUP/KRW"]
 
 
 def test_selector_requires_strong_close_location_for_breakout_candidate():

@@ -5,6 +5,8 @@ from typing import Sequence
 from investment_bot.core.settings import get_settings
 from investment_bot.core.trading_policy import build_trading_policy
 
+from investment_bot.features.exit.application.evaluator import ExitEvaluator
+from investment_bot.features.exit.domain.models import MarketSnapshot, PositionSnapshot
 from investment_bot.models.market import Candle
 from investment_bot.models.signal import TradeSignal
 from investment_bot.risk.controller import RiskController
@@ -39,28 +41,25 @@ class TradingCycleService:
         
         # Near-miss observability for trend_following
         signal = self._enrich_near_miss(signal, market_info)
-        exit_rule = self.paper_broker.evaluate_exit_rules(signal.symbol, latest_price, now=cycle_time)
-        if exit_rule.get("status") == "triggered":
-            signal = TradeSignal(
-                strategy_name=signal.strategy_name,
-                symbol=signal.symbol,
-                action=exit_rule.get("action", "sell"),
-                confidence=1.0,
-                reason=f"broker_exit:{exit_rule.get('reason')}; {signal.reason}",
-                meta={
-                    **getattr(signal, "meta", {}),
-                    "force_exit": True,
-                    "exit_reason": exit_rule.get("reason"),
-                    "exit_size_scale": exit_rule.get("size_scale"),
-                },
-            )
+        signal = self._resolve_exit_signal(
+            strategy_name=strategy_name,
+            signal=signal,
+            latest_price=latest_price,
+            cycle_time=cycle_time,
+        )
 
         try:
             route_block_reason = self._route_block_reason(strategy_name=strategy_name, market_info=market_info, action=signal.action)
         except TypeError:
             route_block_reason = self._route_block_reason(strategy_name=strategy_name, market_info=market_info)
         force_exit = bool(getattr(signal, "meta", {}).get("force_exit", False))
-        
+        policy_snapshot = policy.snapshot
+        sideways_allowed_for_trend = (
+            strategy_name == "trend_following"
+            and market_info.get("regime") == "sideways"
+            and "sideways" in set(policy_snapshot.trend_strategy_allowed_regimes)
+        )
+
         # Check for sideways exception pass before blocking
         exception_pass = None
         if not force_exit and strategy_name == "trend_following" and market_info.get("regime") == "sideways":
@@ -84,7 +83,7 @@ class TradingCycleService:
                 reason=f"{route_block_reason}; {signal.reason}",
                 meta=self._append_near_miss_block_reason(getattr(signal, "meta", {}), stage="route_filter", block_reason=route_block_reason),
             )
-        elif not force_exit and strategy_name == "trend_following" and market_info.get("regime") == "sideways" and not exception_pass:
+        elif not force_exit and strategy_name == "trend_following" and market_info.get("regime") == "sideways" and not exception_pass and not sideways_allowed_for_trend:
             signal = TradeSignal(
                 strategy_name=signal.strategy_name,
                 symbol=signal.symbol,
@@ -151,6 +150,130 @@ class TradingCycleService:
             "broker_result": broker_result,
             "portfolio": self.paper_broker.portfolio_snapshot(),
         }
+
+    def _resolve_exit_signal(self, strategy_name: str, signal: TradeSignal, latest_price: float, cycle_time: datetime | None) -> TradeSignal:
+        strategy_exit_signal = self._apply_strategy_exit(
+            strategy_name=strategy_name,
+            signal=signal,
+            latest_price=latest_price,
+            cycle_time=cycle_time,
+        )
+        broker_exit_signal = self._apply_broker_exit(
+            signal=strategy_exit_signal,
+            latest_price=latest_price,
+            cycle_time=cycle_time,
+        )
+        return self._choose_preferred_exit_signal(
+            base_signal=signal,
+            candidates=[strategy_exit_signal, broker_exit_signal],
+        )
+
+    def _apply_strategy_exit(self, strategy_name: str, signal: TradeSignal, latest_price: float, cycle_time: datetime | None) -> TradeSignal:
+        if strategy_name not in {"trend_following", "mean_reversion", "dca"}:
+            return signal
+
+        position = self.paper_broker.positions.get(signal.symbol, {})
+        position_qty = float(position.get("quantity", 0.0) or 0.0)
+        if position_qty <= 0:
+            return signal
+
+        opened_at = position.get("opened_at")
+        if isinstance(opened_at, str):
+            opened_at = self._parse_candle_timestamp(opened_at)
+
+        evaluator = ExitEvaluator(
+            settings=get_settings(),
+            min_order_notional=self.paper_broker.min_order_notional,
+            slippage_pct=self.paper_broker.slippage_pct,
+        )
+        decision = evaluator.evaluate_strategy_exit(
+            position=PositionSnapshot(
+                symbol=signal.symbol,
+                quantity=position_qty,
+                average_price=float(position.get("average_price", 0.0) or 0.0),
+                opened_at=opened_at,
+            ),
+            market=MarketSnapshot(
+                latest_price=latest_price,
+                now=cycle_time,
+                trend_reversal=bool(getattr(signal, "meta", {}).get("trend_reversal_hint", False)),
+            ),
+            stop_loss_pct=getattr(signal, "meta", {}).get("strategy_stop_loss_pct"),
+            take_profit_pct=getattr(signal, "meta", {}).get("strategy_take_profit_pct"),
+            managed_rebound_exit_threshold=getattr(signal, "meta", {}).get("managed_rebound_exit_threshold"),
+            managed_rebound_exit_reason=getattr(signal, "meta", {}).get("managed_rebound_exit_reason"),
+        )
+        if not decision.triggered:
+            return signal
+        return self._build_force_exit_signal(
+            signal=signal,
+            source="strategy",
+            exit_reason=decision.exit_reason or decision.reason,
+            exit_size_scale=decision.quantity,
+            confidence=decision.confidence,
+        )
+
+    def _apply_broker_exit(self, signal: TradeSignal, latest_price: float, cycle_time: datetime | None) -> TradeSignal:
+        exit_rule = self.paper_broker.evaluate_exit_rules(signal.symbol, latest_price, now=cycle_time)
+        if exit_rule.get("status") != "triggered":
+            return signal
+        resolved_source = str(exit_rule.get("exit_source", "broker") or "broker")
+        forced_signal = self._build_force_exit_signal(
+            signal=signal,
+            source=resolved_source,
+            exit_reason=str(exit_rule.get("exit_reason", exit_rule.get("reason", "broker_exit")) or "broker_exit"),
+            exit_size_scale=float(exit_rule.get("exit_size_scale", exit_rule.get("size_scale", 0.0)) or 0.0),
+            confidence=float(exit_rule.get("confidence", 1.0) or 1.0),
+        )
+        forced_signal.meta["exit_priority"] = int(exit_rule.get("exit_priority", forced_signal.meta.get("exit_priority", 0)) or 0)
+        if exit_rule.get("exit_priority_label"):
+            forced_signal.meta["exit_priority_label"] = exit_rule.get("exit_priority_label")
+        return forced_signal
+
+    def _build_force_exit_signal(
+        self,
+        *,
+        signal: TradeSignal,
+        source: str,
+        exit_reason: str,
+        exit_size_scale: float,
+        confidence: float,
+    ) -> TradeSignal:
+        return TradeSignal(
+            strategy_name=signal.strategy_name,
+            symbol=signal.symbol,
+            action="sell",
+            confidence=confidence,
+            reason=f"{source}_exit:{exit_reason}; {signal.reason}",
+            meta={
+                **getattr(signal, "meta", {}),
+                "force_exit": True,
+                "exit_reason": exit_reason,
+                "exit_size_scale": exit_size_scale,
+                "exit_source": source,
+                "exit_priority": self._exit_priority(source),
+            },
+        )
+
+    def _choose_preferred_exit_signal(self, base_signal: TradeSignal, candidates: list[TradeSignal]) -> TradeSignal:
+        force_exit_candidates = [candidate for candidate in candidates if bool(getattr(candidate, "meta", {}).get("force_exit", False))]
+        if not force_exit_candidates:
+            return candidates[-1] if candidates else base_signal
+        return max(
+            force_exit_candidates,
+            key=lambda candidate: (
+                int(getattr(candidate, "meta", {}).get("exit_priority", 0) or 0),
+                float(candidate.confidence or 0.0),
+            ),
+        )
+
+    def _exit_priority(self, source: str) -> int:
+        priorities = {
+            "strategy": 100,
+            "broker": 200,
+            "live_override": 300,
+        }
+        return priorities.get(source, 0)
 
     def _route_block_reason(self, strategy_name: str, market_info: dict, action: str | None = None) -> str | None:
         if action == "sell":

@@ -29,8 +29,8 @@ class FakeSemiLiveService:
             "symbol": symbol,
             "timeframe": timeframe,
             "limit": limit,
-            "signal": {"strategy_name": strategy_name, "symbol": symbol, "action": "hold", "confidence": 0.0, "reason": "test"},
-            "review": {"approved": False, "action": "hold", "reason": "test", "target_notional": 0.0, "size_scale": 0.0},
+            "signal": {"strategy_name": strategy_name, "symbol": symbol, "action": "hold", "confidence": 0.0, "reason": "test", "meta": {"block_reason": "demo_block"}},
+            "review": {"approved": False, "action": "hold", "reason": "test", "confidence": 0.0, "cash_balance": 12345.0, "latest_price": 101000.0, "target_notional": 0.0, "size_scale": 0.0},
             "portfolio": {"total_equity": 99999},
             "broker_result": None,
         }
@@ -49,6 +49,9 @@ class FakeAccountService:
             "asset_count": 1,
             "assets": [{"currency": "BTC", "balance": 0.25, "avg_buy_price": 100000000.0}],
         }
+
+    def summarize_upbit_balances_internal(self):
+        return self.summarize_upbit_balances()
 
     def get_asset_balance(self, symbol: str):
         return {
@@ -87,4 +90,6 @@ def test_shadow_service_syncs_exchange_balance_into_paper_broker(tmp_path):
     assert len(recorded) == 1
     payload = recorded[0]['payload']
     assert payload['decision']['signal']['action'] == 'hold'
+    assert payload['decision']['signal']['meta']['block_reason'] == 'demo_block'
+    assert payload['decision']['review']['latest_price'] == 101000.0
     assert 'portfolio' not in payload['decision']

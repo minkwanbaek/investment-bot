@@ -156,6 +156,9 @@ class FakeAccountService:
             assets.append({"currency": asset, "balance": bal, "estimated_cost_basis": bal * avg})
         return {"exchange": "upbit", "krw_cash": self.krw_cash, "asset_count": len(assets), "assets": assets}
 
+    def summarize_upbit_balances_internal(self):
+        return self.summarize_upbit_balances()
+
     def get_asset_balance(self, symbol: str):
         bal = self.asset_balances.get(symbol, 0.0)
         avg = self.avg_buy_prices.get(symbol, 1000.0)
@@ -173,6 +176,14 @@ class FixedDynamicSymbolSelector:
 
     def select(self, symbols: list[str], timeframe: str, top_n: int = 10) -> list[str]:
         return list(self.selected)
+
+
+class RankedFallbackDynamicSymbolSelector:
+    def __init__(self, ranked_fallback_symbols: list[str]):
+        self.last_debug_info = {"ranked_fallback_symbols": list(ranked_fallback_symbols)}
+
+    def select(self, symbols: list[str], timeframe: str, top_n: int = 10) -> list[str]:
+        return []
 
 
 def make_service(tmp_path, settings: Settings, shadow: FakeShadowService, account: FakeAccountService):
@@ -301,6 +312,49 @@ def test_trading_cycle_route_block_reason_for_uncertain_regime():
     assert service._route_block_reason('trend_following', {'regime': 'mixed'}) == 'uncertain_regime_blocked'
 
 
+def test_trading_cycle_allows_trend_following_buy_in_sideways_when_policy_explicitly_allows(monkeypatch):
+    from investment_bot.core.settings import get_settings
+    from investment_bot.models.market import Candle
+    from investment_bot.risk.controller import RiskController
+    from investment_bot.services.trading_cycle import TradingCycleService
+    from investment_bot.services.market_regime_classifier import MarketRegimeClassifier
+
+    get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, 'blocked_hours', [])
+    monkeypatch.setattr(settings, 'sideway_filter_enabled', False)
+    monkeypatch.setattr(settings, 'trend_strategy_allowed_regimes', ['trend_up', 'sideways'])
+    monkeypatch.setattr(settings, 'higher_tf_bias_filter_enabled', False)
+    monkeypatch.setattr(
+        MarketRegimeClassifier,
+        'classify',
+        lambda self, candles: {
+            'regime': 'sideways',
+            'volatility_state': 'low',
+            'higher_tf_bias': 'neutral',
+            'trend_gap_pct': 0.0024,
+            'range_pct': 0.02,
+            'momentum_pct': 0.0025,
+        },
+    )
+
+    candles = [
+        Candle(symbol='ADA/KRW', timeframe='1h', open=1, high=1, low=1, close=close, volume=volume, timestamp=str(i))
+        for i, (close, volume) in enumerate(
+            zip([100, 101, 102, 103, 104, 105, 107, 109], [10, 10, 10, 10, 10, 10, 10, 15])
+        )
+    ]
+
+    broker = PaperBroker(starting_cash=100000.0, ledger_store=None, min_order_notional=5000.0)
+    service = TradingCycleService(risk_controller=RiskController(), paper_broker=broker)
+
+    result = service.run('trend_following', candles)
+
+    assert result['signal']['action'] == 'buy'
+    assert result['review']['approved'] is True
+    assert result['market_regime'] == 'sideways'
+
+
 def test_risk_controller_blocks_buy_on_bearish_higher_tf_bias(monkeypatch):
     from investment_bot.models.signal import TradeSignal
     from investment_bot.risk.controller import RiskController
@@ -385,6 +439,11 @@ def test_paper_broker_partial_take_profit_trigger(tmp_path):
     result = broker.evaluate_exit_rules('BTC/KRW', market_price=10350.0)
     assert result['status'] == 'triggered'
     assert result['reason'] == 'partial_take_profit'
+    assert result['exit_reason'] == 'partial_take_profit'
+    assert result['exit_source'] == 'broker'
+    assert result['exit_priority'] == 220
+    assert result['exit_priority_label'] == 'profit_take'
+    assert result['exit_size_scale'] == 1.0
     assert result['size_scale'] == 1.0
     pos = broker.positions['BTC/KRW']
     assert pos['trailing_active'] is True
@@ -459,6 +518,9 @@ def test_paper_broker_trailing_stop_trigger(tmp_path):
     result = broker.evaluate_exit_rules('BTC/KRW', market_price=10150.0, now=datetime.now(timezone.utc))
     assert result['status'] == 'triggered'
     assert result['reason'] == 'trailing_stop'
+    assert result['exit_source'] == 'broker'
+    assert result['exit_priority'] == 230
+    assert result['exit_priority_label'] == 'protective'
 
 
 def test_paper_broker_timeout_exit_trigger(tmp_path):
@@ -476,6 +538,146 @@ def test_paper_broker_timeout_exit_trigger(tmp_path):
     result = broker.evaluate_exit_rules('BTC/KRW', market_price=10020.0, now=datetime.now(timezone.utc))
     assert result['status'] == 'triggered'
     assert result['reason'] == 'timeout'
+    assert result['exit_source'] == 'broker'
+    assert result['exit_priority'] == 230
+    assert result['exit_priority_label'] == 'protective'
+
+
+def test_auto_trade_non_actionable_includes_top_hold_candidates(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.42,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "sideways"},
+        },
+        ("BTC/KRW", "mean_reversion"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.15,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "sideways"},
+        },
+        ("BTC/KRW", "dca"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.05,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "sideways"},
+        },
+    })
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["BTC/KRW"], enabled_strategies=["trend_following"]),
+        shadow,
+        FakeAccountService(krw_cash=100000.0),
+    )
+
+    result = service.run_once()
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "non_actionable_signal"
+    assert result["top_hold_candidates"]
+    assert result["top_hold_candidates"][0]["symbol"] == "BTC/KRW"
+    assert result["top_hold_candidates"][0]["confidence"] == pytest.approx(0.42)
+
+
+def test_auto_trade_non_actionable_includes_blocked_sell_diagnostics(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {
+            "action": "sell",
+            "latest_price": 1000.0,
+            "confidence": 1.0,
+            "target_notional": 1000.0,
+            "market_regime": {"regime": "trend_down"},
+        },
+        ("BTC/KRW", "mean_reversion"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.15,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "trend_down"},
+        },
+        ("BTC/KRW", "dca"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.05,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "trend_down"},
+        },
+    })
+    service = make_service(
+        tmp_path,
+        Settings(symbols=["BTC/KRW"], enabled_strategies=["trend_following"]),
+        shadow,
+        FakeAccountService(krw_cash=100000.0, asset_balances={"BTC/KRW": 1.0}, avg_buy_prices={"BTC/KRW": 1000.0}),
+    )
+
+    result = service.run_once()
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "non_actionable_signal"
+    assert result["top_blocked_candidates"]
+    assert result["top_blocked_candidates"][0]["symbol"] == "BTC/KRW"
+    assert result["top_blocked_candidates"][0]["blocker"] == "below_min_managed_position_notional"
+
+
+def test_auto_trade_uses_ranked_dynamic_fallback_slice_when_selector_returns_zero(tmp_path):
+    shadow = FakeShadowService({
+        ("BTC/KRW", "trend_following"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.1,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "trend_up"},
+        },
+        ("ETH/KRW", "trend_following"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.1,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "trend_up"},
+        },
+        ("XRP/KRW", "trend_following"): {
+            "action": "buy",
+            "latest_price": 1000.0,
+            "confidence": 0.7,
+            "target_notional": 10000.0,
+            "market_regime": {"regime": "trend_up"},
+        },
+        ("XRP/KRW", "mean_reversion"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.1,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "trend_up"},
+        },
+        ("XRP/KRW", "dca"): {
+            "action": "hold",
+            "latest_price": 1000.0,
+            "confidence": 0.1,
+            "target_notional": 0.0,
+            "market_regime": {"regime": "trend_up"},
+        },
+    })
+    service = make_service(
+        tmp_path,
+        Settings(
+            symbols=["BTC/KRW", "ETH/KRW", "XRP/KRW"],
+            enabled_strategies=["trend_following"],
+            dynamic_symbol_selection=True,
+            dynamic_symbol_top_n=1,
+        ),
+        shadow,
+        FakeAccountService(krw_cash=100000.0),
+    )
+    service.dynamic_symbol_selector = RankedFallbackDynamicSymbolSelector(["XRP/KRW", "ETH/KRW"])
+
+    result = service.run_once()
+
+    assert result["status"] == "submitted"
+    assert result["symbol"] == "XRP/KRW"
 
 
 def test_standard_backtest_returns_config_snapshot():
@@ -1075,7 +1277,7 @@ def test_auto_trade_service_reports_managed_notional_when_sell_is_blocked_by_thr
     result = service.run_once()
     assert result['status'] == 'skipped'
     assert result['reason'] == 'non_actionable_signal'
-    assert result['top_hold_candidates'] == []
+    assert len(result['top_hold_candidates']) == 3
 
 
 def test_auto_trade_service_logs_hold_summary_when_all_candidates_are_non_actionable(tmp_path, caplog):
@@ -1089,8 +1291,8 @@ def test_auto_trade_service_logs_hold_summary_when_all_candidates_are_non_action
         result = service.run_once()
     assert result["status"] == "skipped"
     assert result["reason"] == "non_actionable_signal"
-    assert result["top_hold_candidates"] == []
-    assert "top_hold_candidates" not in caplog.text
+    assert len(result["top_hold_candidates"]) == 3
+    assert "top_hold_candidates" in caplog.text
 
 
 def test_auto_trade_service_stop_loss_uses_price_pct_not_quantity(tmp_path):
@@ -1103,6 +1305,9 @@ def test_auto_trade_service_stop_loss_uses_price_pct_not_quantity(tmp_path):
     result = service.run_once()
     assert result['status'] == 'submitted'
     assert result['override']['override_reason'] == 'stop_loss'
+    assert result['override']['exit_reason'] == 'stop_loss'
+    assert result['override']['exit_source'] == 'live_override'
+    assert result['override']['exit_priority'] == 300
     assert result['submit']['volume'] == 0.00060394
 
 
@@ -1117,6 +1322,9 @@ def test_auto_trade_service_take_profit_trailing_stop_with_small_btc_quantity(tm
     result = service.run_once()
     assert result['status'] == 'submitted'
     assert result['override']['override_reason'] == 'take_profit_trailing_stop'
+    assert result['override']['exit_reason'] == 'take_profit_trailing_stop'
+    assert result['override']['exit_source'] == 'live_override'
+    assert result['override']['exit_priority'] == 200
     assert result['submit']['volume'] == 0.00030197
 
 
@@ -1133,6 +1341,9 @@ def test_auto_trade_service_trailing_profit_uses_peak_activation_after_pullback(
 
     assert result['status'] == 'submitted'
     assert result['override']['override_reason'] == 'take_profit_trailing_stop'
+    assert result['override']['exit_reason'] == 'take_profit_trailing_stop'
+    assert result['override']['exit_source'] == 'live_override'
+    assert result['override']['exit_priority'] == 200
     assert result['submit']['volume'] == 0.00030197
 
 
@@ -1170,4 +1381,6 @@ def test_auto_trade_service_prioritizes_stop_loss_override_over_trailing_profit(
     assert result["symbol"] == "ETH/KRW"
     assert result["side"] == "sell"
     assert result["override"]["override_reason"] == "stop_loss"
+    assert result["override"]["exit_source"] == "live_override"
+    assert result["override"]["exit_priority"] == 300
     assert result["submit"]["volume"] == 10.0
