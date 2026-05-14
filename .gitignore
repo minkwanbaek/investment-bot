@@ -9,4 +9,3 @@ __pycache__/
 data/
 .codex/
 ops/ralph/state/
-ops/watchdog/
