@@ -46,6 +46,13 @@ class SlippageBoundarySellUpbitClient(FakeUpbitClient):
         ]
 
 
+class ExactMinCashUpbitClient(FakeUpbitClient):
+    def get_balances(self):
+        return [
+            {"currency": "KRW", "balance": "5000", "locked": "0", "avg_buy_price": "0", "unit_currency": "KRW"},
+        ]
+
+
 def test_live_execution_preview_normalizes_and_blocks_live_submission(tmp_path):
     client = FakeUpbitClient()
     service = LiveExecutionService(
@@ -242,6 +249,24 @@ def test_live_execution_submit_preserves_specific_preview_block_reason(tmp_path)
     assert submitted["status"] == "blocked"
     assert submitted["reason"] == "below_min_order_notional"
     assert submitted["notional"] < submitted["min_order_notional"]
+
+
+def test_live_execution_preview_blocks_buy_when_fee_pushes_min_order_over_cash(tmp_path):
+    client = ExactMinCashUpbitClient()
+    service = LiveExecutionService(
+        upbit_client=client,
+        exchange_rules_service=ExchangeRulesService(upbit_client=client),
+        run_history_service=RunHistoryService(store=RunHistoryStore(str(tmp_path / "run_history.json"))),
+        account_service=AccountService(upbit_client=client),
+        live_mode="live",
+        confirm_live_trading=True,
+    )
+
+    preview = service.preview_order(symbol="BTC/KRW", side="buy", price=1000, volume=5)
+
+    assert preview["allowed"] is False
+    assert preview["notional"] < preview["min_order_notional"]
+    assert preview["total_cost"] <= 5000
 
 
 def test_live_execution_blocks_sell_when_balance_is_insufficient(tmp_path):

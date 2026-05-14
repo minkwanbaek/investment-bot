@@ -11,6 +11,8 @@ from investment_bot.models.market import Candle
 
 
 class MarketRegimeClassifier:
+    min_trend_gap_pct = 0.0012
+
     def classify(self, candles: Sequence[Candle]) -> dict:
         closes = [c.close for c in candles]
         if len(closes) < 8:
@@ -52,7 +54,7 @@ class MarketRegimeClassifier:
         else:
             higher_tf_bias = "neutral"
 
-        if range_pct < 0.01 or abs(trend_gap_pct) < 0.0015:
+        if range_pct < 0.01 or abs(trend_gap_pct) < self.min_trend_gap_pct:
             regime = REGIME_SIDEWAYS
         elif trend_gap_pct > 0 and momentum_pct > 0:
             regime = REGIME_TREND_UP
